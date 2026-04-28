@@ -439,8 +439,8 @@ class LiveDigitalTwinWindow(QMainWindow):
         self.UIAxes_2D_Sec = QtInteractor()
         
         grid_2d = QGridLayout(); grid_2d.setSpacing(12) 
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Top), 0, 0, 2, 3) 
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Front), 2, 0, 1, 2) 
+        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Front), 0, 0, 2, 3) 
+        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Top), 2, 0, 1, 2) 
         grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Sec), 2, 2, 1, 1) 
         grid_2d.setRowStretch(0, 1); grid_2d.setRowStretch(1, 1); grid_2d.setRowStretch(2, 1)
         grid_2d.setColumnStretch(0, 1); grid_2d.setColumnStretch(1, 1); grid_2d.setColumnStretch(2, 1)
@@ -541,7 +541,8 @@ class LiveDigitalTwinWindow(QMainWindow):
             self.in_Lposition.setText(f"{p_mm:.1f}")
 
             # 2. Logic & ROM Selection
-            target = 'Fix' if (strains[0] > strains[1] or strains[2] > strains[1]) else ('Simply' if np.argmax(strains) == 1 else 'Cant')
+            strains_array = np.array(strains)
+            target = 'Fix' if (abs(strains[0]) > abs(strains[1]) or abs(strains[2]) > abs(strains[1])) else ('Simply' if np.argmax(np.abs(strains_array)) == 1 else 'Cant')
             self.Active_ROM = next((r for r in self.DT_Bank if target.lower() in r['Label'].lower()), self.DT_Bank[0])
 
             # 3. Inject Data to Offline Studio
@@ -649,7 +650,7 @@ class LiveDigitalTwinWindow(QMainWindow):
         if mode == "Stress":
             s_map = {'Sigma_xx': 0, 'Sigma_yy': 1, 'Sigma_zz': 2, 'Tau_xy': 3, 'Tau_yz': 4, 'Tau_zx': 5}
             col = s_map.get(self.StressTypeCombo.currentText(), 0)
-            return self.current_Sigma[:, col] / 1e6, "jet"
+            return self.current_Sigma[:, col] / 1e6, "jet", "Stress (MPa)"
         else:
             sx, sy, sz = self.current_Sigma[:, 0], self.current_Sigma[:, 1], self.current_Sigma[:, 2]
             txy, tyz, tzx = self.current_Sigma[:, 3], self.current_Sigma[:, 4], self.current_Sigma[:, 5]
@@ -667,15 +668,15 @@ class LiveDigitalTwinWindow(QMainWindow):
                 else: val = (eigenvalues[:, 2] - eigenvalues[:, 0]) / 2.0 / 1e6
             else: val = np.sqrt(0.5*((sx-sy)**2 + (sy-sz)**2 + (sz-sx)**2 + 6*(txy**2 + tyz**2 + tzx**2))) / 1e6
                 
-            if self.FailDisplayCombo.currentText() == "Stress": return val, "jet"
+            if self.FailDisplayCombo.currentText() == "Stress": return val, "jet", "Stress (MPa)"
             else:
                 try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
                 except: yield_strength = 250.0 
-                return yield_strength / np.maximum(val, 1e-6), "jet_r"
+                return yield_strength / np.maximum(val, 1e-6), "jet_r", "Factor of Safety"
 
     def render_2d_orthographic(self, custom_clim=None):
         if self.current_U is None: return
-        scalars, cmap = self.get_plot_scalars()
+        scalars, cmap ,plot_name = self.get_plot_scalars()
         try: sf = float(self.ScaleFactorEditField_2.text())
         except: sf = 500.0
 
@@ -707,24 +708,23 @@ class LiveDigitalTwinWindow(QMainWindow):
         idx_top = np.where(np.abs(nodes[:, 2] - target_z) < 1e-4)[0]
         if len(idx_top) > 0:
             surf_top = pv.PolyData(nodes[idx_top]).delaunay_2d()
-            surf_top['Data'] = scalars[idx_top]
-            self.UIAxes_2D_Top.add_mesh(surf_top, name='top', scalars='Data', cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=0.5, scalar_bar_args=sargs_horiz, reset_camera=False)
+            surf_top[plot_name] = scalars[idx_top]
+            self.UIAxes_2D_Top.add_mesh(surf_top, name='top', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=0.5, scalar_bar_args=sargs_horiz, reset_camera=False)
         else: self.UIAxes_2D_Top.add_mesh(pv.PolyData(), name='top', reset_camera=False)
 
         self.UIAxes_2D_Top.add_text(f"Top View (XY) | Layer: {top_choice}", name='txt_top', font_size=10, color='black')
-
-        # 2. Front View (Deformed Slice)
+        
         cam_front = self.UIAxes_2D_Front.camera_position if hasattr(self, '_2d_cams_initialized') else None
         if 'Hexa' in self.launcher.offline_studio.element_type: n_vis = 8; vtk_type = pv.CellType.HEXAHEDRON
         else: n_vis = 4; vtk_type = pv.CellType.TETRA
         cells_dict = {vtk_type: self.launcher.offline_studio.element_connectivity[:, :n_vis]}
         grid_deformed = pv.UnstructuredGrid(cells_dict, def_coords)
-        grid_deformed.point_data['Data'] = scalars
+        grid_deformed.point_data[plot_name] = scalars
 
         y_cut = (grid_deformed.bounds[2] + grid_deformed.bounds[3]) / 2.0 
         try:
             front_slice = grid_deformed.slice(normal='y', origin=(0, y_cut, 0))
-            self.UIAxes_2D_Front.add_mesh(front_slice, name='front', scalars='Data', cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=1.5, scalar_bar_args=sargs_vert, reset_camera=False)
+            self.UIAxes_2D_Front.add_mesh(front_slice, name='front', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=1.5, scalar_bar_args=sargs_vert, reset_camera=False)
         except: self.UIAxes_2D_Front.add_mesh(pv.PolyData(), name='front', reset_camera=False)
         self.UIAxes_2D_Front.add_text("Front View (XZ) | Deformed Axis Slice", name='txt_front', font_size=10, color='black')
         if cam_front is not None: self.UIAxes_2D_Front.camera_position = cam_front
@@ -738,8 +738,8 @@ class LiveDigitalTwinWindow(QMainWindow):
         if len(idx_sec) > 0:
             pts_yz = nodes[idx_sec].copy(); pts_yz[:, 0] = 0 
             surf_sec = pv.PolyData(pts_yz).delaunay_2d(); surf_sec.points[:, 0] = nodes[idx_sec, 0] 
-            surf_sec['Data'] = scalars[idx_sec]
-            self.UIAxes_2D_Sec.add_mesh(surf_sec, name='section', scalars='Data', cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=0.5, scalar_bar_args=sargs_horiz, reset_camera=False)
+            surf_sec[plot_name] = scalars[idx_sec]
+            self.UIAxes_2D_Sec.add_mesh(surf_sec, name='section', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=0.5, scalar_bar_args=sargs_horiz, reset_camera=False)
         else: self.UIAxes_2D_Sec.add_mesh(pv.PolyData(), name='section', reset_camera=False)
         self.UIAxes_2D_Sec.add_text(f"Section Cut (YZ) | X={closest_x:.2f}m", name='txt_sec', font_size=10, color='black')
 
@@ -2196,7 +2196,6 @@ class OfflinePreparationStudio(QMainWindow):
 
             yield_strength = float(self.YieldStrengthMpaEditField.text()) if self.YieldStrengthMpaEditField.text() else 250.0
             self.scale_factor = float(self.ScaleFactorEditField.text()) if self.ScaleFactorEditField.text() else 1.0
-            self.S_max = yield_strength
             self.stress_type = self.TypeofStressesDropDown.currentText()
             self.faliuremode = self.MethodDropDown.currentText()
             display_choice = self.DisplayChoiceDropDown.currentText()
@@ -2219,14 +2218,13 @@ class OfflinePreparationStudio(QMainWindow):
                       'Tau_xy':   (3, 'Tau_xy'),   'Tau_yz':   (4, 'Tau_yz'),   'Tau_zx':   (5, 'Tau_zx'), 'Tau_xz':   (5, 'Tau_zx')}
         col, lbl = stress_map.get(stress_type, (0, 'Sigma_xx'))
         stress_data = Sigma_Final[:, col] / 1e6 
-        
+        s_max=max(stress_data); 
         # --- NEW: Custom Limit Override ---
         if custom_clim is not None:
             c_limits = custom_clim
         else:
-            s_min = -self.S_max if self.S_max else -250.0
-            s_max = self.S_max if self.S_max else 250.0
-            if s_min == s_max: s_max = s_min + 1e-6 
+            s_min=min(stress_data); 
+            s_max = max(stress_data)
             c_limits = [s_min, s_max]
         # ----------------------------------
         
@@ -2275,10 +2273,6 @@ class OfflinePreparationStudio(QMainWindow):
             
         targetAxes.render()
 
-            
-        targetAxes.render()
-
-
     def plot_FS(self, failure_mode, yield_strength, targetAxes, Sigma_Final, U_full, scale_factor, display_type="FS", custom_clim=None):
         if len(self.node_coords) != len(Sigma_Final): return
             
@@ -2305,9 +2299,10 @@ class OfflinePreparationStudio(QMainWindow):
             if custom_clim is not None:
                 c_limits = custom_clim
             else:
-                s_min = -self.S_max if self.S_max else -250.0; s_max = self.S_max if self.S_max else 250.0
-                if s_min == s_max: s_max = s_min + 1e-6
+                s_min=min(C_data); 
+                s_max = max(C_data)
                 c_limits = [s_min, s_max]
+    
             title_str = f"{failure_mode} (MPa)\nMax Deflection: {(np.max(np.abs(U_full)) * 1000.0):.3f} mm"
         else:
             plot_scalars = FS_data; plot_name = "Factor of Safety"; cmap_choice = "jet_r"
@@ -2968,7 +2963,8 @@ class ROMVisualizerWindow(QMainWindow):
         if mode == "Stress":
             s_map = {'Sigma_xx': 0, 'Sigma_yy': 1, 'Sigma_zz': 2, 'Tau_xy': 3, 'Tau_yz': 4, 'Tau_zx': 5}
             col = s_map.get(self.StressTypeCombo.currentText(), 0)
-            return self.current_Sigma[:, col] / 1e6, "jet"
+            ledgend = "Stress (MPa)"
+            return self.current_Sigma[:, col] / 1e6, "jet", ledgend
         else:
             sx, sy, sz = self.current_Sigma[:, 0], self.current_Sigma[:, 1], self.current_Sigma[:, 2]
             txy, tyz, tzx = self.current_Sigma[:, 3], self.current_Sigma[:, 4], self.current_Sigma[:, 5]
@@ -2992,18 +2988,20 @@ class ROMVisualizerWindow(QMainWindow):
             # --------------------------------------------------
                 
             if self.FailDisplayCombo.currentText() == "Stress":
-                return val, "jet"
+                ledgend = "Stress (MPa)"
+                return val, "jet", ledgend
             else:
                 try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
                 except: yield_strength = 250.0 
                 fs = yield_strength / np.maximum(val, 1e-6)
-                return fs, "jet_r"
+                ledgend = "FS"
+                return fs, "jet_r",ledgend
 
     def render_2d_orthographic(self, custom_clim=None):
         """Renders Top/Sec (Undeformed Frame) and Front (Deformed Shape) dynamically."""
         if self.current_U is None: return
 
-        scalars, cmap = self.get_plot_scalars()
+        scalars, cmap, plot_name = self.get_plot_scalars()
         try: sf = float(self.ScaleFactorEditField_2.text())
         except: sf = 500.0
 
@@ -3043,8 +3041,8 @@ class ROMVisualizerWindow(QMainWindow):
         if len(idx_top) > 0:
             # Build surface using UNDEFORMED coords, but color it with NEW scalars
             surf_top = pv.PolyData(nodes[idx_top]).delaunay_2d()
-            surf_top['Data'] = scalars[idx_top]
-            self.UIAxes_2D_Top.add_mesh(surf_top, name='top', scalars='Data', cmap=cmap, clim=c_limits, 
+            surf_top[plot_name] = scalars[idx_top]
+            self.UIAxes_2D_Top.add_mesh(surf_top, name='top', scalars=plot_name, cmap=cmap, clim=c_limits, 
                                         show_edges=True, edge_color='black', line_width=0.5, 
                                         scalar_bar_args=sargs_horiz, reset_camera=False)
         else:
@@ -3065,12 +3063,12 @@ class ROMVisualizerWindow(QMainWindow):
         
         # Use def_coords here to show the bending shape
         grid_deformed = pv.UnstructuredGrid(cells_dict, def_coords)
-        grid_deformed.point_data['Data'] = scalars
+        grid_deformed.point_data[plot_name] = scalars
 
         y_cut = (grid_deformed.bounds[2] + grid_deformed.bounds[3]) / 2.0 
         try:
             front_slice = grid_deformed.slice(normal='y', origin=(0, y_cut, 0))
-            self.UIAxes_2D_Front.add_mesh(front_slice, name='front', scalars='Data', cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=1.5, scalar_bar_args=sargs_vert, reset_camera=False)
+            self.UIAxes_2D_Front.add_mesh(front_slice, name='front', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=1.5, scalar_bar_args=sargs_vert, reset_camera=False)
         except:
             self.UIAxes_2D_Front.add_mesh(pv.PolyData(), name='front', reset_camera=False)
 
@@ -3100,8 +3098,8 @@ class ROMVisualizerWindow(QMainWindow):
             surf_sec = pv.PolyData(pts_yz).delaunay_2d()
             surf_sec.points[:, 0] = nodes[idx_sec, 0] # Restore frozen Undeformed X coords
             
-            surf_sec['Data'] = scalars[idx_sec]
-            self.UIAxes_2D_Sec.add_mesh(surf_sec, name='section', scalars='Data', cmap=cmap, clim=c_limits, 
+            surf_sec[plot_name] = scalars[idx_sec]
+            self.UIAxes_2D_Sec.add_mesh(surf_sec, name='section', scalars=plot_name, cmap=cmap, clim=c_limits, 
                                         show_edges=True, edge_color='black', line_width=0.5, 
                                         scalar_bar_args=sargs_horiz, reset_camera=False)
         else:
