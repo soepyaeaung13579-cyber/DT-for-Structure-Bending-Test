@@ -334,10 +334,17 @@ class LiveDigitalTwinWindow(QMainWindow):
         for lbl in [self.predict_s1, self.predict_s2, self.predict_s3]: lbl.setStyleSheet(style_green)
         self.lbl_fs_status.setStyleSheet("font-size: 11pt; font-weight: bold; color: white; background: #7f8c8d; padding: 5px;")
         
+        self.pre_s1_loc = QLineEdit(""); self.pre_s1_loc.setPlaceholderText("Probe location 1: mm")
+        self.pre_s2_loc = QLineEdit(""); self.pre_s2_loc.setPlaceholderText("Probe location 2: mm")
+        self.pre_s3_loc = QLineEdit(""); self.pre_s3_loc.setPlaceholderText("Probe location 3: mm")
+        
         out_lay.addWidget(self.predict_s1, 0, 0)
+        out_lay.addWidget(QLabel("Location:"), 0, 1); out_lay.addWidget(self.pre_s1_loc, 0, 2, 1, 2)
         out_lay.addWidget(self.predict_s2, 1, 0)
+        out_lay.addWidget(QLabel("Location:"), 1, 1); out_lay.addWidget(self.pre_s2_loc, 1, 2, 1, 2)
         out_lay.addWidget(self.predict_s3, 2, 0)
-        out_lay.addWidget(self.lbl_fs_status, 0, 1, 3, 1, Qt.AlignmentFlag.AlignCenter)
+        out_lay.addWidget(QLabel("Location:"), 2, 1); out_lay.addWidget(self.pre_s3_loc, 2, 2, 1, 2)
+        out_lay.addWidget(self.lbl_fs_status, 0, 4, 3, 1, Qt.AlignmentFlag.AlignCenter)
         top_bar_layout.addWidget(out_grp, 1)
 
         # --- TOP CENTER: VIEW BOX (Rendering Options) ---
@@ -573,9 +580,31 @@ class LiveDigitalTwinWindow(QMainWindow):
 
             # 5. Update Output Box (Predictions)
             nodes = self.Active_ROM['Nodes']
-            idx_s1 = np.argmin(np.abs(nodes[:,0] - Lx*0.25))
-            idx_s2 = np.argmin(np.abs(nodes[:,0] - Lx*0.50))
-            idx_s3 = np.argmin(np.abs(nodes[:,0] - Lx*0.75))
+            loc_1= self.pre_s1_loc.text().strip()
+            loc_2= self.pre_s2_loc.text().strip()
+            loc_3= self.pre_s3_loc.text().strip()
+            # sensor is install at the lower fiber layer, so we look for nodes near the bottom (minz) at specified x locations
+            tol_x = Lx * 0.02  # 2% tolerance for x-coordinate matching
+            
+            # Parse user-input locations, use defaults if invalid
+            try: x_loc_1 = float(loc_1)
+            except: x_loc_1 = Lx * 0.25
+            try: x_loc_2 = float(loc_2)
+            except: x_loc_2 = Lx * 0.50
+            try: x_loc_3 = float(loc_3)
+            except: x_loc_3 = Lx * 0.75
+            
+            # Find nodes near x=x_loc_1 with minimum z (lower fiber layer)
+            mask_s1 = np.abs(nodes[:,0] - x_loc_1) < tol_x
+            idx_s1 = np.where(mask_s1)[0][np.argmin(nodes[mask_s1, 2])] if np.any(mask_s1) else np.argmin(np.abs(nodes[:,0] - x_loc_1))
+            
+            # Find nodes near x=x_loc_2 with minimum z (lower fiber layer)
+            mask_s2 = np.abs(nodes[:,0] - x_loc_2) < tol_x
+            idx_s2 = np.where(mask_s2)[0][np.argmin(nodes[mask_s2, 2])] if np.any(mask_s2) else np.argmin(np.abs(nodes[:,0] - x_loc_2))
+            
+            # Find nodes near x=x_loc_3 with minimum z (lower fiber layer)
+            mask_s3 = np.abs(nodes[:,0] - x_loc_3) < tol_x
+            idx_s3 = np.where(mask_s3)[0][np.argmin(nodes[mask_s3, 2])] if np.any(mask_s3) else np.argmin(np.abs(nodes[:,0] - x_loc_3))
             
             p1 = self.current_Sigma[idx_s1, 0] / self.launcher.offline_studio.material['E'] * 1e6
             p2 = self.current_Sigma[idx_s2, 0] / self.launcher.offline_studio.material['E'] * 1e6
