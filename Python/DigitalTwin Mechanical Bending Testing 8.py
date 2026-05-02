@@ -3484,7 +3484,7 @@ class WorkbenchLaunchpad(QMainWindow):
     def __init__(self):
         super().__init__()
         # 1. NEW TITLE
-        self.setWindowTitle("Digital Twin for Structure Bending Test Project Schematic")
+        self.setWindowTitle("Digital Twin for Smart Structure Lab")
         self.setGeometry(100, 100, 1000, 750) # Expanded to fit the new professional layout
         
         # Show splash screen with loading bar
@@ -3559,8 +3559,8 @@ class WorkbenchLaunchpad(QMainWindow):
             layout.addWidget(logo_img)
         
         # Title
-        title = QLabel("Digital Twin Workbench - Structure Bending Test")
-        title.setFont(QFont("Arial", 20, QFont.Weight.Bold))
+        title = QLabel("Digital Twin Workbench")
+        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("color: #ecf0f1; margin-top: 10px;")
         layout.addWidget(title)
@@ -3609,7 +3609,7 @@ class WorkbenchLaunchpad(QMainWindow):
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         
         # --- PROFESSIONAL HEADER WITH LOGO ---
-        header = ProfessionalTheme.create_header_widget("Digital Twin Workbench - Structure Bending Test")
+        header = ProfessionalTheme.create_header_widget("Digital Twin Workbench-Smart Structures Lab", "CSE IMAGE.png")
         self.main_layout.addWidget(header)
         
         # --- HORIZONTAL SPLITTER (Sidebar + Schematic) ---
