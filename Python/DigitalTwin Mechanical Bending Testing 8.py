@@ -475,20 +475,20 @@ class LiveDigitalTwinWindow(QMainWindow):
         # =================================================================
         top_container = QWidget()
         top_grid = QGridLayout(top_container)
-        top_grid.setContentsMargins(10, 10, 10, 10)
-        top_grid.setSpacing(12)
+        top_grid.setContentsMargins(1, 1, 1, 1)
+        top_grid.setSpacing(5)
 
         # --- Column 0: Header (Spans both rows) ---
         self.header = ProfessionalTheme.create_header_widget("Monitor")
-        self.header.setFixedWidth(240)
-        top_grid.addWidget(self.header, 0, 0, 2, 1)
+        self.header.setFixedWidth(550)
+        top_grid.addWidget(self.header, 0, 0, 1, 0)
 
-        # --- ROW 0, COL 1: Live Predictions (Priority Space) ---
+        # --- ROW 0, COL 2: Live Predictions (Priority Space) ---
         out_grp = QGroupBox("Live Predictions & Safety Status")
         ProfessionalTheme.apply_professional_panel_style(out_grp)
         out_lay = QHBoxLayout(out_grp)
         out_lay.setContentsMargins(20, 12, 20, 12)
-        out_lay.setSpacing(20)
+        out_lay.setSpacing(5)
         
         self.predict_s1 = QLabel("P1: --"); self.predict_s2 = QLabel("P2: --"); self.predict_s3 = QLabel("P3: --")
         self.lbl_fs_status = QLabel("FS STATUS: WAITING")
@@ -500,15 +500,14 @@ class LiveDigitalTwinWindow(QMainWindow):
         self.lbl_fs_status.setStyleSheet(f"font-weight: bold; color: white; background: {ProfessionalTheme.PRIMARY_BLUE}; padding: 10px; border-radius: 6px; min-width: 180px; font-size: 11pt; border: 2px solid {ProfessionalTheme.ACCENT_BLUE};")
         self.lbl_fs_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         out_lay.addWidget(self.lbl_fs_status)
+        top_grid.addWidget(out_grp, 0, 2)
         
-        top_grid.addWidget(out_grp, 0, 1)
-
-        # --- ROW 0, COL 2: Visualization Controls (Compact) ---
+        # --- ROW 1, COL 1: Visualization Controls (Compact) ---
         view_grp = QGroupBox("Visualization")
         ProfessionalTheme.apply_professional_panel_style(view_grp)
         view_lay = QHBoxLayout(view_grp)
         view_lay.setContentsMargins(12, 8, 12, 8)
-        view_lay.setSpacing(8)
+        view_lay.setSpacing(5)
 
         self.PrimaryModeCombo = QComboBox(); self.PrimaryModeCombo.addItems(["Failure", "Stress"])
         self.PrimaryModeCombo.setFixedWidth(90)
@@ -537,13 +536,13 @@ class LiveDigitalTwinWindow(QMainWindow):
         self.btn_reset_cam.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.TEXT_GRAY, width=95))
         view_lay.addWidget(self.btn_reset_cam)
         
-        top_grid.addWidget(view_grp, 0, 2)
+        top_grid.addWidget(view_grp, 1, 1)
 
         # --- ROW 1: Hardware Interface (SPACED & PROFESSIONAL) ---
         in_grp = QGroupBox("Cyber-Physical Hardware Interface")
         ProfessionalTheme.apply_professional_panel_style(in_grp)
         in_lay = QHBoxLayout(in_grp)
-        in_lay.setContentsMargins(18, 10, 18, 10)
+        in_lay.setContentsMargins(20, 12, 20, 12)
         in_lay.setSpacing(12)
         
         # Zone 1: Buttons
@@ -564,7 +563,9 @@ class LiveDigitalTwinWindow(QMainWindow):
         separator.setFrameShape(QFrame.Shape.VLine)
         separator.setStyleSheet(f"color: {ProfessionalTheme.BORDER_LIGHT};")
         in_lay.addWidget(separator)
+
         
+
         # Helper to create professional readout clusters
         def add_readout(label_text, widget):
             container = QVBoxLayout()
