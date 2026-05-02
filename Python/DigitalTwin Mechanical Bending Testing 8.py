@@ -11,14 +11,15 @@ import scipy.sparse.linalg as spla
 from scipy.integrate import cumulative_trapezoid
 import pyvista as pv
 from pyvistaqt import QtInteractor
+import gc  # Added for memory management
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QFormLayout, QPushButton, QMessageBox, QInputDialog, QGridLayout, 
                              QTableWidgetItem, QLabel, QLineEdit, QComboBox, QTextEdit, 
                              QSlider, QCheckBox, QSplitter, QSizePolicy, QGroupBox, QTableWidget, 
-                             QStackedWidget, QListWidget, QFileDialog, QTabWidget, QFrame) # <--- QTabWidget added here!
+                             QStackedWidget, QListWidget, QFileDialog, QTabWidget, QFrame, QProgressDialog, QDialog, QProgressBar) # <--- Added QProgressDialog, QDialog, QProgressBar!
 from PyQt6.QtCore import Qt, QTime, QUrl ,QTimer
-from PyQt6.QtGui import QFont, QAction, QDesktopServices 
+from PyQt6.QtGui import QFont, QAction, QDesktopServices,QPixmap
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import pickle
@@ -31,6 +32,143 @@ import traceback
 import os
 import pickle
 import numpy as np
+
+# =========================================================================
+# PROFESSIONAL COLOR SCHEME & STYLING CONSTANTS
+# =========================================================================
+class ProfessionalTheme:
+    """Professional color palette for the Digital Twin application."""
+    # Main Colors
+    PRIMARY_BLUE = "#1e3a5f"
+    DARK_BLUE = "#0f1f2e"
+    ACCENT_BLUE = "#2980b9"
+    BRIGHT_BLUE = "#3498db"
+    
+    # Secondary Colors
+    SUCCESS_GREEN = "#27ae60"
+    HOVER_GREEN = "#229954"
+    WARNING_ORANGE = "#e67e22"
+    DANGER_RED = "#e74c3c"
+    ERROR_RED = "#c0392b"
+    INFO_PURPLE = "#8e44ad"
+    
+    # Neutrals
+    BACKGROUND_LIGHT = "#f5f6fa"
+    BACKGROUND_MEDIUM = "#ecf0f1"
+    BACKGROUND_DARK = "#2c3e50"
+    TEXT_DARK = "#1a1a1a"
+    TEXT_LIGHT = "#ecf0f1"
+    TEXT_GRAY = "#7f8c8d"
+    BORDER_COLOR = "#bdc3c7"
+    BORDER_LIGHT = "#d5dbdb"
+    
+    # Gradients & Overlays
+    CONSOLE_BG = "#1e1e1e"
+    CONSOLE_TEXT = "#00ff00"
+    SHADOW_COLOR = "rgba(0, 0, 0, 0.15)"
+    
+    @staticmethod
+    def create_header_widget(title_text, logo_path="CSE IMAGE.png"):
+        """Creates a professional header widget with logo and title."""
+        header_widget = QWidget()
+        header_widget.setStyleSheet(f"""
+            QWidget {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 {ProfessionalTheme.PRIMARY_BLUE}, 
+                    stop:1 {ProfessionalTheme.ACCENT_BLUE});
+                border-bottom: 3px solid {ProfessionalTheme.DARK_BLUE};
+            }}
+        """)
+        header_widget.setFixedHeight(100)
+        
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(20, 12, 20, 12)
+        header_layout.setSpacing(15)
+        
+        # Logo
+        logo_label = QLabel()
+        logo_pixmap = QPixmap(logo_path)
+        if not logo_pixmap.isNull():
+            logo_label.setPixmap(logo_pixmap.scaled(80, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        header_layout.addWidget(logo_label)
+        
+        # Title Section
+        title_layout = QVBoxLayout()
+        title_layout.setSpacing(4)
+        title_label = QLabel(title_text)
+        title_label.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+        title_label.setStyleSheet(f"color: {ProfessionalTheme.TEXT_LIGHT};")
+        title_layout.addWidget(title_label)
+        
+        subtitle_label = QLabel("Digital Twin Monitoring System")
+        subtitle_label.setFont(QFont("Segoe UI", 11))
+        subtitle_label.setStyleSheet(f"color: #e8eef7; font-weight: 400;")
+        title_layout.addWidget(subtitle_label)
+        title_layout.addStretch()
+        
+        header_layout.addLayout(title_layout, 1)
+        header_layout.addStretch()
+        
+        return header_widget
+
+    @staticmethod
+    def apply_professional_panel_style(widget):
+        """Applies professional panel styling to a group box."""
+        if isinstance(widget, QGroupBox):
+            widget.setStyleSheet(f"""
+                QGroupBox {{
+                    font-weight: 600;
+                    border: 1px solid {ProfessionalTheme.BORDER_LIGHT};
+                    border-radius: 8px;
+                    margin-top: 10px;
+                    background-color: #ffffff;
+                    padding: 12px;
+                }}
+                QGroupBox::title {{
+                    subcontrol-origin: margin;
+                    left: 15px;
+                    padding: 0 5px;
+                    color: {ProfessionalTheme.PRIMARY_BLUE};
+                    font-weight: bold;
+                    font-size: 11pt;
+                }}
+            """)
+    
+    @staticmethod
+    def create_button_style(bg_color, text_color="white", hover_color=None, width=None):
+        """Factory method to create professional button styles."""
+        if hover_color is None:
+            # Auto-darken for hover effect
+            hover_color = bg_color.replace("#", "")
+            r, g, b = int(hover_color[0:2], 16), int(hover_color[2:4], 16), int(hover_color[4:6], 16)
+            r, g, b = max(0, r-20), max(0, g-20), max(0, b-20)
+            hover_color = f"#{r:02x}{g:02x}{b:02x}"
+        
+        width_str = f"min-width: {width}px;" if width else ""
+        return f"""
+            QPushButton {{
+                background-color: {bg_color};
+                color: {text_color};
+                font-weight: bold;
+                padding: 8px 14px;
+                border: none;
+                border-radius: 5px;
+                font-size: 10pt;
+                {width_str}
+            }}
+            QPushButton:hover {{
+                background-color: {hover_color};
+                border: 1px solid {ProfessionalTheme.TEXT_DARK};
+            }}
+            QPushButton:pressed {{
+                background-color: {hover_color};
+                padding: 9px 13px;
+            }}
+            QPushButton:disabled {{
+                background-color: #ccc;
+                color: #999;
+            }}
+        """
 
 # =========================================================================
 # BACKGROUND HARDWARE THREAD (Prevents GUI Freezes)
@@ -139,17 +277,30 @@ class CalibrationWindow(QMainWindow):
         left = QVBoxLayout(); mid = QVBoxLayout(); right = QVBoxLayout()
 
         c_grp = QGroupBox("Hardware Controls"); c_lay = QFormLayout()
-        self.btn_conn = QPushButton("Connect Arduino")
+        ProfessionalTheme.apply_professional_panel_style(c_grp)
+        self.btn_conn = QPushButton("🔌 Connect Arduino")
+        self.btn_conn.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=140))
         self.btn_conn.clicked.connect(self.handle_connect)
-        self.lbl_status = QLabel("Disconnected")
+        self.lbl_status = QLabel("⚪ Disconnected")
+        self.lbl_status.setStyleSheet(f"color: {ProfessionalTheme.TEXT_GRAY}; font-weight: 500;")
         
-        self.btn_load_tare = QPushButton("Tare Load Cell"); self.btn_load_tare.clicked.connect(self.tare_load)
-        self.m_input = QLineEdit("1.0") 
-        self.btn_load_cal = QPushButton("Set Load Factor"); self.btn_load_cal.clicked.connect(self.calibrate_load)
+        self.btn_load_tare = QPushButton("📊 Tare Load Cell")
+        self.btn_load_tare.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.INFO_PURPLE, width=140))
+        self.btn_load_tare.clicked.connect(self.tare_load)
+        self.m_input = QLineEdit("1.0")
+        self.m_input.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 6px; font-size: 10pt;")
+        self.btn_load_cal = QPushButton("⚙️ Set Load Factor")
+        self.btn_load_cal.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=140))
+        self.btn_load_cal.clicked.connect(self.calibrate_load)
         
-        self.btn_strain_tare = QPushButton("Tare Strain (Mid)"); self.btn_strain_tare.clicked.connect(self.tare_strain)
-        self.d_input = QLineEdit("1.0") 
-        self.btn_strain_cal = QPushButton("Set AMP_GAIN"); self.btn_strain_cal.clicked.connect(self.calibrate_gain)
+        self.btn_strain_tare = QPushButton("📈 Tare Strain")
+        self.btn_strain_tare.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.INFO_PURPLE, width=140))
+        self.btn_strain_tare.clicked.connect(self.tare_strain)
+        self.d_input = QLineEdit("1.0")
+        self.d_input.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 6px; font-size: 10pt;")
+        self.btn_strain_cal = QPushButton("⚙️ Set AMP_GAIN")
+        self.btn_strain_cal.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=140))
+        self.btn_strain_cal.clicked.connect(self.calibrate_gain)
 
         c_lay.addRow(self.btn_conn, self.lbl_status); c_lay.addRow(self.btn_load_tare)
         c_lay.addRow("Standard Mass (kg):", self.m_input); c_lay.addRow(self.btn_load_cal)
@@ -157,25 +308,28 @@ class CalibrationWindow(QMainWindow):
         c_lay.addRow(self.btn_strain_cal); c_grp.setLayout(c_lay); left.addWidget(c_grp)
 
         v_grp = QGroupBox("Validation Mode"); v_lay = QFormLayout()
+        ProfessionalTheme.apply_professional_panel_style(v_grp)
         self.mode = QComboBox(); self.mode.addItems(["Fixed-Fixed", "Simply Supported", "Cantilever"])
         self.pos_x = QLineEdit("250.0")
         v_lay.addRow("Beam Boundary:", self.mode); v_lay.addRow("Gauge X (mm):", self.pos_x)
         v_grp.setLayout(v_lay); left.addWidget(v_grp); left.addStretch()
 
         self.log_a = QTextEdit(); self.log_a.setReadOnly(True)
-        self.log_a.setStyleSheet("background: #1e1e1e; color: #00ff00; font-family: Courier;")
-        mid.addWidget(QLabel("<b>Process Log:</b>")); mid.addWidget(self.log_a)
+        self.log_a.setStyleSheet(f"background: {ProfessionalTheme.CONSOLE_BG}; color: {ProfessionalTheme.CONSOLE_TEXT}; font-family: Courier; border: 1px solid {ProfessionalTheme.BORDER_COLOR}; border-radius: 4px;")
+        mid.addWidget(QLabel("<b style='color: {ProfessionalTheme.PRIMARY_BLUE};'>Process Log:</b>")); mid.addWidget(self.log_a)
         
         f_grp = QGroupBox("Derived Factors"); f_lay = QFormLayout()
+        ProfessionalTheme.apply_professional_panel_style(f_grp)
         self.l_fac = QLabel("1.0"); self.a_fac = QLabel("100.0")
         f_lay.addRow("Load Factor (bits/kg):", self.l_fac); f_lay.addRow("AMP_GAIN:", self.a_fac)
         f_grp.setLayout(f_lay); mid.addWidget(f_grp)
 
         d_grp = QGroupBox("Live Readouts"); d_lay = QGridLayout()
+        ProfessionalTheme.apply_professional_panel_style(d_grp)
         self.l_load = QLabel("0.00 N"); self.l_s1 = QLabel("0.0 uE"); self.l_s2 = QLabel("0.0 uE")
         self.l_s3 = QLabel("0.0 uE"); self.l_virt = QLabel("0.00 mm"); self.l_pos = QLabel("0.00 mm")
         
-        style = "font-size: 12pt; font-weight: bold; color: #00ff00; background: black; padding: 2px;"
+        style = f"font-size: 14pt; font-weight: bold; color: {ProfessionalTheme.SUCCESS_GREEN}; background: {ProfessionalTheme.CONSOLE_BG}; padding: 8px; border-radius: 4px; border: 1px solid {ProfessionalTheme.PRIMARY_BLUE};"
         for lbl in [self.l_load, self.l_s1, self.l_s2, self.l_s3, self.l_virt, self.l_pos]: lbl.setStyleSheet(style)
         
         d_lay.addWidget(QLabel("Force:"), 0, 0); d_lay.addWidget(self.l_load, 0, 1)
@@ -317,171 +471,187 @@ class LiveDigitalTwinWindow(QMainWindow):
         
     def build_ui(self):
         # =================================================================
-        # 1. TOP CONTROL BAR (Split into Left, Center, Right)
+        # 1. TOP PROFESSIONAL DASHBOARD (2-Row Grid Style)
         # =================================================================
-        top_bar_layout = QHBoxLayout()
+        top_container = QWidget()
+        top_grid = QGridLayout(top_container)
+        top_grid.setContentsMargins(10, 10, 10, 10)
+        top_grid.setSpacing(12)
 
-        # --- TOP LEFT: OUTPUT BOX (Predictions & Safety) ---
+        # --- Column 0: Header (Spans both rows) ---
+        self.header = ProfessionalTheme.create_header_widget("Monitor")
+        self.header.setFixedWidth(240)
+        top_grid.addWidget(self.header, 0, 0, 2, 1)
+
+        # --- ROW 0, COL 1: Live Predictions (Priority Space) ---
         out_grp = QGroupBox("Live Predictions & Safety Status")
-        out_lay = QGridLayout(out_grp)
+        ProfessionalTheme.apply_professional_panel_style(out_grp)
+        out_lay = QHBoxLayout(out_grp)
+        out_lay.setContentsMargins(20, 12, 20, 12)
+        out_lay.setSpacing(20)
         
-        self.predict_s1 = QLabel("P1: -- uE (Err: --%)")
-        self.predict_s2 = QLabel("P2: -- uE (Err: --%)")
-        self.predict_s3 = QLabel("P3: -- uE (Err: --%)")
-        self.lbl_fs_status = QLabel("FS STATUS: WAITING...")
+        self.predict_s1 = QLabel("P1: --"); self.predict_s2 = QLabel("P2: --"); self.predict_s3 = QLabel("P3: --")
+        self.lbl_fs_status = QLabel("FS STATUS: WAITING")
         
-        style_green = "font-size: 10pt; font-weight: bold; color: #00ff00; background: black; padding: 4px;"
-        for lbl in [self.predict_s1, self.predict_s2, self.predict_s3]: lbl.setStyleSheet(style_green)
-        self.lbl_fs_status.setStyleSheet("font-size: 11pt; font-weight: bold; color: white; background: #7f8c8d; padding: 5px;")
+        style_val = f"font-weight: bold; color: {ProfessionalTheme.SUCCESS_GREEN}; background: {ProfessionalTheme.CONSOLE_BG}; padding: 10px; border-radius: 6px; min-width: 130px; font-size: 11pt; border: 1px solid #34495e;"
+        for lbl in [self.predict_s1, self.predict_s2, self.predict_s3]:
+            lbl.setStyleSheet(style_val); lbl.setAlignment(Qt.AlignmentFlag.AlignCenter); out_lay.addWidget(lbl)
         
-        self.pre_s1_loc = QLineEdit(""); self.pre_s1_loc.setPlaceholderText("Probe location 1: mm")
-        self.pre_s2_loc = QLineEdit(""); self.pre_s2_loc.setPlaceholderText("Probe location 2: mm")
-        self.pre_s3_loc = QLineEdit(""); self.pre_s3_loc.setPlaceholderText("Probe location 3: mm")
+        self.lbl_fs_status.setStyleSheet(f"font-weight: bold; color: white; background: {ProfessionalTheme.PRIMARY_BLUE}; padding: 10px; border-radius: 6px; min-width: 180px; font-size: 11pt; border: 2px solid {ProfessionalTheme.ACCENT_BLUE};")
+        self.lbl_fs_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        out_lay.addWidget(self.lbl_fs_status)
         
-        out_lay.addWidget(self.predict_s1, 0, 0)
-        out_lay.addWidget(QLabel("Location:"), 0, 1); out_lay.addWidget(self.pre_s1_loc, 0, 2, 1, 2)
-        out_lay.addWidget(self.predict_s2, 1, 0)
-        out_lay.addWidget(QLabel("Location:"), 1, 1); out_lay.addWidget(self.pre_s2_loc, 1, 2, 1, 2)
-        out_lay.addWidget(self.predict_s3, 2, 0)
-        out_lay.addWidget(QLabel("Location:"), 2, 1); out_lay.addWidget(self.pre_s3_loc, 2, 2, 1, 2)
-        out_lay.addWidget(self.lbl_fs_status, 0, 4, 3, 1, Qt.AlignmentFlag.AlignCenter)
-        top_bar_layout.addWidget(out_grp, 1)
+        top_grid.addWidget(out_grp, 0, 1)
 
-        # --- TOP CENTER: VIEW BOX (Rendering Options) ---
-        view_grp = QGroupBox("Visualization Controls")
-        view_lay = QGridLayout(view_grp)
-        
+        # --- ROW 0, COL 2: Visualization Controls (Compact) ---
+        view_grp = QGroupBox("Visualization")
+        ProfessionalTheme.apply_professional_panel_style(view_grp)
+        view_lay = QHBoxLayout(view_grp)
+        view_lay.setContentsMargins(12, 8, 12, 8)
+        view_lay.setSpacing(8)
+
         self.PrimaryModeCombo = QComboBox(); self.PrimaryModeCombo.addItems(["Failure", "Stress"])
+        self.PrimaryModeCombo.setFixedWidth(90)
+        self.PrimaryModeCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
+        
         self.options_stack = QStackedWidget()
-        
-        fail_widget = QWidget(); fail_lay = QHBoxLayout(fail_widget); fail_lay.setContentsMargins(0,0,0,0)
-        self.FailDisplayCombo = QComboBox(); self.FailDisplayCombo.addItems(["FS", "Stress Intensity"])
-        self.FailMethodCombo = QComboBox(); self.FailMethodCombo.addItems(["Von Mises", "Max Principal", "Max Shear (Tresca)"])
-        fail_lay.addWidget(QLabel("Show:")); fail_lay.addWidget(self.FailDisplayCombo); fail_lay.addWidget(self.FailMethodCombo)
-        self.options_stack.addWidget(fail_widget)
-        
-        stress_widget = QWidget(); stress_lay = QHBoxLayout(stress_widget); stress_lay.setContentsMargins(0,0,0,0)
+        # Failure Settings
+        fail_container = QWidget(); fail_lay = QHBoxLayout(fail_container); fail_lay.setContentsMargins(0,0,0,0)
+        self.FailDisplayCombo = QComboBox(); self.FailDisplayCombo.addItems(["FS", "Intensity"])
+        self.FailDisplayCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
+        self.FailMethodCombo = QComboBox(); self.FailMethodCombo.addItems(["Von Mises", "Max Principal", "Max Shear"])
+        self.FailMethodCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
+        fail_lay.addWidget(self.FailDisplayCombo); fail_lay.addWidget(self.FailMethodCombo)
+        self.options_stack.addWidget(fail_container)
+        # Stress Settings
+        stress_container = QWidget(); stress_lay = QHBoxLayout(stress_container); stress_lay.setContentsMargins(0,0,0,0)
         self.StressTypeCombo = QComboBox(); self.StressTypeCombo.addItems(["Sigma_xx", "Sigma_yy", "Sigma_zz", "Tau_xy", "Tau_yz", "Tau_zx"])
-        stress_lay.addWidget(QLabel("Component:")); stress_lay.addWidget(self.StressTypeCombo)
-        self.options_stack.addWidget(stress_widget)
-        
-        view_lay.addWidget(QLabel("Mode:"), 0, 0); view_lay.addWidget(self.PrimaryModeCombo, 0, 1)
-        view_lay.addWidget(self.options_stack, 0, 2)
-        
-        self.ScaleFactorEditField_2 = QLineEdit("500"); self.ScaleFactorEditField_2.setFixedWidth(50)
-        view_lay.addWidget(QLabel("Scale:"), 0, 3); view_lay.addWidget(self.ScaleFactorEditField_2, 0, 4)
+        self.StressTypeCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
+        stress_lay.addWidget(self.StressTypeCombo); self.options_stack.addWidget(stress_container)
 
-        self.AutoColorLimitSwitch = QCheckBox("Auto Color"); self.AutoColorLimitSwitch.setChecked(True)
-        self.CMinEdit = QLineEdit("-250"); self.CMinEdit.setFixedWidth(40); self.CMinEdit.setEnabled(False)
-        self.CMaxEdit = QLineEdit("250"); self.CMaxEdit.setFixedWidth(40); self.CMaxEdit.setEnabled(False)
-        self.btn_apply_color = QPushButton("Apply"); self.btn_apply_color.setEnabled(False)
+        self.PrimaryModeCombo.currentIndexChanged.connect(self.options_stack.setCurrentIndex)
         
-        view_lay.addWidget(self.AutoColorLimitSwitch, 1, 0, 1, 2)
-        color_lay = QHBoxLayout(); color_lay.addWidget(QLabel("Min:")); color_lay.addWidget(self.CMinEdit)
-        color_lay.addWidget(QLabel("Max:")); color_lay.addWidget(self.CMaxEdit); color_lay.addWidget(self.btn_apply_color)
-        view_lay.addLayout(color_lay, 1, 2, 1, 2)
+        view_lay.addWidget(self.PrimaryModeCombo); view_lay.addWidget(self.options_stack)
+        self.btn_reset_cam = QPushButton("🎥 Reset View")
+        self.btn_reset_cam.setFixedWidth(100)
+        self.btn_reset_cam.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.TEXT_GRAY, width=95))
+        view_lay.addWidget(self.btn_reset_cam)
+        
+        top_grid.addWidget(view_grp, 0, 2)
 
-        self.btn_reset_cam = QPushButton("🎥 Default 3D View")
-        self.btn_reset_cam.setStyleSheet("background-color: #34495e; color: white; font-weight: bold;")
-        view_lay.addWidget(self.btn_reset_cam, 1, 4)
-        top_bar_layout.addWidget(view_grp, 2)
+        # --- ROW 1: Hardware Interface (SPACED & PROFESSIONAL) ---
+        in_grp = QGroupBox("Cyber-Physical Hardware Interface")
+        ProfessionalTheme.apply_professional_panel_style(in_grp)
+        in_lay = QHBoxLayout(in_grp)
+        in_lay.setContentsMargins(18, 10, 18, 10)
+        in_lay.setSpacing(12)
+        
+        # Zone 1: Buttons
+        self.btn_connect_hw = QPushButton("🔌 Connect")
+        self.btn_connect_hw.setFixedWidth(110)
+        self.btn_connect_hw.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=110))
+        
+        self.btn_go_live = QPushButton("▶ LIVE")
+        self.btn_go_live.setFixedWidth(95)
+        self.btn_go_live.setCheckable(True)
+        self.btn_go_live.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.SUCCESS_GREEN, width=95))
+        
+        in_lay.addWidget(self.btn_connect_hw)
+        in_lay.addWidget(self.btn_go_live)
+        
+        # Separator line
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setStyleSheet(f"color: {ProfessionalTheme.BORDER_LIGHT};")
+        in_lay.addWidget(separator)
+        
+        # Helper to create professional readout clusters
+        def add_readout(label_text, widget):
+            container = QVBoxLayout()
+            lbl = QLabel(f"{label_text}")
+            lbl.setStyleSheet(f"font-size: 8pt; color: {ProfessionalTheme.TEXT_GRAY}; font-weight: 500; text-align: center;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            widget.setFixedWidth(80)
+            widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            widget.setStyleSheet(f"background: {ProfessionalTheme.CONSOLE_BG}; color: #00ff00; font-weight: bold; font-size: 11pt; border: 1px solid {ProfessionalTheme.BORDER_COLOR}; border-radius: 4px; padding: 5px; font-family: 'Courier New';")
+            container.addWidget(lbl)
+            container.addWidget(widget)
+            in_lay.addLayout(container)
 
-        # --- TOP RIGHT: INPUT BOX (Hardware Sensors) ---
-        in_grp = QGroupBox("Cyber-Physical Hardware")
-        in_lay = QGridLayout(in_grp)
+        self.in_Load = QLineEdit("0.0"); self.in_S1 = QLineEdit("0"); self.in_S2 = QLineEdit("0")
+        self.in_S3 = QLineEdit("0"); self.in_Ultra = QLineEdit("0.0")
         
-        self.btn_connect_hw = QPushButton("Connect Hardware")
-        self.btn_connect_hw.setStyleSheet("background-color: #f39c12; color: black; font-weight: bold;")
-        self.btn_go_live = QPushButton("GO LIVE"); self.btn_go_live.setCheckable(True)
-        self.btn_go_live.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
-        
-        in_lay.addWidget(self.btn_connect_hw, 0, 0, 1, 2)
-        in_lay.addWidget(self.btn_go_live, 0, 2, 1, 2)
-        
-        self.in_s1 = QLineEdit("0.0"); self.in_s2 = QLineEdit("0.0"); self.in_s3 = QLineEdit("0.0")
-        self.in_Lposition = QLineEdit("0.0"); self.in_Load = QLineEdit("0.0")
-        for w in [self.in_s1, self.in_s2, self.in_s3, self.in_Lposition, self.in_Load]: 
-            w.setFixedWidth(50); w.setReadOnly(True); w.setStyleSheet("background: #f0f0f0;")
-            
-        in_lay.addWidget(QLabel("SG1:"), 1, 0); in_lay.addWidget(self.in_s1, 1, 1)
-        in_lay.addWidget(QLabel("SG2:"), 1, 2); in_lay.addWidget(self.in_s2, 1, 3)
-        in_lay.addWidget(QLabel("SG3:"), 2, 0); in_lay.addWidget(self.in_s3, 2, 1)
-        in_lay.addWidget(QLabel("Pos:"), 2, 2); in_lay.addWidget(self.in_Lposition, 2, 3)
-        in_lay.addWidget(QLabel("Load:"), 1, 4, 2, 1, Qt.AlignmentFlag.AlignRight); in_lay.addWidget(self.in_Load, 1, 5, 2, 1)
-        top_bar_layout.addWidget(in_grp, 1)
+        for w in [self.in_Load, self.in_S1, self.in_S2, self.in_S3, self.in_Ultra]: w.setReadOnly(True)
 
-        self.main_layout.addLayout(top_bar_layout, 0)
+        # Adding readouts with structured spacing
+        add_readout("LOAD\n(N)", self.in_Load)
+        add_readout("SG-1\n(uE)", self.in_S1)
+        add_readout("SG-2\n(uE)", self.in_S2)
+        add_readout("SG-3\n(uE)", self.in_S3)
+        add_readout("POS\n(mm)", self.in_Ultra)
+        
+        in_lay.addStretch()
+        
+        top_grid.addWidget(in_grp, 1, 2, 1, 1)  # Move to Row 1, Col 2 (top right)
+
+        # Set Column Stretching - balance space for more graphics area
+        top_grid.setColumnStretch(1, 3) # More space for future graphics expansion
+        top_grid.setColumnStretch(2, 2) # Hardware + Visualization compact area
+
+        self.main_layout.addWidget(top_container)
 
         # =================================================================
-        # 2. MAIN GRAPHICS AREA (3D, 2D Grid, 1D Plots)
+        # 2. MAIN CONTENT AREA (Graphics + Plots)
         # =================================================================
+        content_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.graphics_tabs = QTabWidget()
-        
-        # Tab A: 3D Isometric
+
+        # Tab A: 3D View
         self.tab_3d = QWidget(); layout_3d = QVBoxLayout(self.tab_3d)
-        self.UIAxes_3D = QtInteractor()
-        layout_3d.addWidget(self.UIAxes_3D)
+        self.UIAxes_3D = QtInteractor(); layout_3d.addWidget(self.UIAxes_3D)
         self.graphics_tabs.addTab(self.tab_3d, "3D Isometric View")
-        
-        # Tab B: 2D Orthographic
+
+        # Tab B: 2D View (3 SUBPLOT STYLE)
         self.tab_2d = QWidget(); layout_2d = QVBoxLayout(self.tab_2d)
         sec_ctrl_lay = QHBoxLayout()
-        self.TopSliceCombo = QComboBox(); self.TopSliceCombo.addItems(["Top Layer", "Axis", "Bottom Layer"])
-        sec_ctrl_lay.addWidget(QLabel("<b>Top View Slice (Z):</b>")); sec_ctrl_lay.addWidget(self.TopSliceCombo)
-        
-        beam_len = self.geometry.get('Lx', 1.0)
-        self.lbl_sec = QLabel(f"<b>View Section Cut (X):</b> {beam_len/2:.2f} m")
-        self.ViewSectionSlider = QSlider(Qt.Orientation.Horizontal)
-        self.ViewSectionSlider.setRange(0, 100); self.ViewSectionSlider.setValue(50)
+        self.TopSliceCombo = QComboBox(); self.TopSliceCombo.addItems(["Top", "Axis", "Bottom"])
+        self.ViewSectionSlider = QSlider(Qt.Orientation.Horizontal); self.ViewSectionSlider.setRange(0, 100); self.ViewSectionSlider.setValue(50)
+        self.lbl_sec = QLabel(f"Section Cut (X): {self.geometry.get('Lx',1.0)/2:.2f} m")
+        sec_ctrl_lay.addWidget(QLabel("Slice:")); sec_ctrl_lay.addWidget(self.TopSliceCombo)
         sec_ctrl_lay.addSpacing(20); sec_ctrl_lay.addWidget(self.lbl_sec); sec_ctrl_lay.addWidget(self.ViewSectionSlider)
         layout_2d.addLayout(sec_ctrl_lay)
-        
-        def wrap_canvas(interactor):
-            frame = QFrame(); frame.setStyleSheet("QFrame { border: 2px solid #7f8c8d; border-radius: 4px; background-color: white; }")
-            lay = QVBoxLayout(frame); lay.setContentsMargins(2, 2, 2, 2); lay.addWidget(interactor)
-            return frame
 
-        self.UIAxes_2D_Top = QtInteractor()
-        self.UIAxes_2D_Front = QtInteractor()
-        self.UIAxes_2D_Sec = QtInteractor()
-        
-        grid_2d = QGridLayout(); grid_2d.setSpacing(12) 
+        def wrap_canvas(interactor):
+            frame = QFrame(); frame.setStyleSheet("QFrame { border: 2px solid #7f8c8d; border-radius: 4px; background: white; }")
+            lay = QVBoxLayout(frame); lay.setContentsMargins(2,2,2,2); lay.addWidget(interactor); return frame
+
+        self.UIAxes_2D_Front = QtInteractor(); self.UIAxes_2D_Top = QtInteractor(); self.UIAxes_2D_Sec = QtInteractor()
+        grid_2d = QGridLayout(); grid_2d.setSpacing(10)
         grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Front), 0, 0, 2, 3) 
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Top), 2, 0, 1, 2) 
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Sec), 2, 2, 1, 1) 
-        grid_2d.setRowStretch(0, 1); grid_2d.setRowStretch(1, 1); grid_2d.setRowStretch(2, 1)
-        grid_2d.setColumnStretch(0, 1); grid_2d.setColumnStretch(1, 1); grid_2d.setColumnStretch(2, 1)
-        
+        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Top), 2, 0, 1, 2)
+        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Sec), 2, 2, 1, 1)
         layout_2d.addLayout(grid_2d)
-        self.graphics_tabs.addTab(self.tab_2d, "2D Sliced Orthographic Views")
+        self.graphics_tabs.addTab(self.tab_2d, "2D Orthographic Views")
+
+        content_splitter.addWidget(self.graphics_tabs)
+
+        # Right Side Plots
+        plots_grp = QGroupBox("Analysis Plots")
+        ProfessionalTheme.apply_professional_panel_style(plots_grp)
+        plots_lay = QVBoxLayout(plots_grp)
+        self.line_figure = Figure(figsize=(4, 6), tight_layout=True); self.line_canvas = FigureCanvas(self.line_figure)
+        plots_lay.addWidget(self.line_canvas); content_splitter.addWidget(plots_grp)
         
-        # Far Right: 1D Line Plots
-        main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_splitter.addWidget(self.graphics_tabs)
-        
-        right_panel = QWidget(); right_lay = QVBoxLayout(right_panel)
-        right_lay.addWidget(QLabel("<b>Engineering Line Plots</b>"))
-        self.line_figure = Figure(figsize=(4, 8), tight_layout=True)
-        self.line_canvas = FigureCanvas(self.line_figure)
-        right_lay.addWidget(self.line_canvas)
-        main_splitter.addWidget(right_panel)
-        
-        main_splitter.setSizes([1000, 400])
-        self.main_layout.addWidget(main_splitter, 1)
+        # Increase graphics area: ratio 75% graphics, 25% plots
+        content_splitter.setSizes([1350, 450])
+        self.main_layout.addWidget(content_splitter, 1)
 
         # --- SIGNAL CONNECTIONS ---
         self.btn_connect_hw.clicked.connect(self.attempt_connect)
         self.btn_go_live.toggled.connect(self.toggle_live_feed)
-        self.btn_reset_cam.clicked.connect(self.reset_camera_view)
-        self.PrimaryModeCombo.currentIndexChanged.connect(self.switch_render_options)
-        self.AutoColorLimitSwitch.stateChanged.connect(self.toggle_color_limits)
-        self.btn_apply_color.clicked.connect(self.update_visuals_only)
         self.ViewSectionSlider.valueChanged.connect(self.on_section_change)
-        self.TopSliceCombo.currentTextChanged.connect(self.update_visuals_only)
         for w in [self.PrimaryModeCombo, self.FailDisplayCombo, self.FailMethodCombo, self.StressTypeCombo]:
             w.currentTextChanged.connect(self.update_visuals_only)
-        self.graphics_tabs.currentChanged.connect(self.update_visuals_only)
-
     # =================================================================
     # UI LOGIC & HARDWARE THREADING
     # =================================================================
@@ -493,12 +663,12 @@ class LiveDigitalTwinWindow(QMainWindow):
 
     def toggle_live_feed(self, checked):
         if checked:
-            self.btn_go_live.setText("LIVE: ON")
-            self.btn_go_live.setStyleSheet("background-color: #e74c3c; color: white; font-weight: bold;")
+            self.btn_go_live.setText("⏹ STOP")
+            self.btn_go_live.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ERROR_RED, width=95))
             self.hw_worker.start()
         else:
-            self.btn_go_live.setText("GO LIVE")
-            self.btn_go_live.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+            self.btn_go_live.setText("▶ LIVE")
+            self.btn_go_live.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.SUCCESS_GREEN, width=95))
             self.hw_worker.stop()
 
     def handle_thread_error(self, err_msg):
@@ -516,7 +686,7 @@ class LiveDigitalTwinWindow(QMainWindow):
         self.update_visuals_only()
 
     def on_section_change(self, val):
-        pos_m = (val / 100.0) * self.geometry.get('Lx', 1.0)
+        pos_m = (val / 100.0) * self.geometry['Lx']
         self.lbl_sec.setText(f"<b>View Section Cut (X):</b> {pos_m:.2f} m")
         if self.graphics_tabs.currentIndex() == 1: self.update_visuals_only()
 
@@ -625,9 +795,11 @@ class LiveDigitalTwinWindow(QMainWindow):
             fs = yield_strength / max(np.max(vm)/1e6, 1e-9) 
             
             if fs < 1.0:
-                self.lbl_fs_status.setText("!!! FAILURE !!!"); self.lbl_fs_status.setStyleSheet("font-size: 12pt; font-weight: bold; background: #c0392b; color: white;")
+                self.lbl_fs_status.setText("⚠️ FAILURE RISK ⚠️"); 
+                self.lbl_fs_status.setStyleSheet(f"font-size: 12pt; font-weight: bold; background: {ProfessionalTheme.ERROR_RED}; color: white; padding: 10px; border-radius: 6px; border: 2px solid #8B0000;")
             else:
-                self.lbl_fs_status.setText(f"FS: {fs:.2f} (SAFE)"); self.lbl_fs_status.setStyleSheet("font-size: 12pt; font-weight: bold; background: black; color: #2ecc71;")
+                self.lbl_fs_status.setText(f"✓ FS: {fs:.2f} | SAFE"); 
+                self.lbl_fs_status.setStyleSheet(f"font-size: 12pt; font-weight: bold; background: {ProfessionalTheme.SUCCESS_GREEN}; color: white; padding: 10px; border-radius: 6px; border: 2px solid {ProfessionalTheme.HOVER_GREEN};")
 
             self._update_graphics()
 
@@ -686,7 +858,8 @@ class LiveDigitalTwinWindow(QMainWindow):
             fail_mode = self.FailMethodCombo.currentText()
             num_nodes = len(sx)
             
-            if "von mises" in fail_mode.lower(): val = np.sqrt(0.5*((sx-sy)**2 + (sy-sz)**2 + (sz-sx)**2 + 6*(txy**2 + tyz**2 + tzx**2))) / 1e6
+            if "von mises" in fail_mode.lower():
+                val = np.sqrt(0.5*((sx-sy)**2 + (sy-sz)**2 + (sz-sx)**2 + 6*(txy**2 + tyz**2 + tzx**2))) / 1e6
             elif "principal" in fail_mode.lower() or "tresca" in fail_mode.lower() or "shear" in fail_mode.lower():
                 stress_tensors = np.zeros((num_nodes, 3, 3))
                 stress_tensors[:, 0, 0] = sx; stress_tensors[:, 0, 1] = txy; stress_tensors[:, 0, 2] = tzx
@@ -713,7 +886,8 @@ class LiveDigitalTwinWindow(QMainWindow):
         U_nodes = self.current_U.reshape(-1, 3)
         def_coords = nodes + (U_nodes * sf)
 
-        if custom_clim is not None: c_limits = custom_clim
+        if custom_clim is not None:
+            c_limits = custom_clim
         else:
             s_min, s_max = np.min(scalars), np.max(scalars)
             if s_min == s_max: s_max = s_min + 1e-6
@@ -759,7 +933,7 @@ class LiveDigitalTwinWindow(QMainWindow):
         if cam_front is not None: self.UIAxes_2D_Front.camera_position = cam_front
 
         # 3. Section View (Static Undeformed)
-        cut_x = (self.ViewSectionSlider.value() / 100.0) * self.geometry['Lx']
+        cut_x = (self.SectionSlider.value() / 100.0) * self.geometry['Lx']
         unique_x = np.unique(np.round(nodes[:, 0], decimals=4))
         closest_x = unique_x[np.argmin(np.abs(unique_x - cut_x))]
         idx_sec = np.where(np.abs(nodes[:, 0] - closest_x) < 1e-4)[0]
@@ -859,12 +1033,12 @@ class OfflinePreparationStudio(QMainWindow):
         
         # 1. Left Sidebar: Workflow Tree
         self.sidebar_widget = QWidget()
-        self.sidebar_widget.setFixedWidth(250)
+        self.sidebar_widget.setFixedWidth(200)
         self.sidebar_layout = QVBoxLayout(self.sidebar_widget)
         self.sidebar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         
         lbl_proj = QLabel("<b>Project Schematic</b>")
-        lbl_proj.setFont(QFont("Arial", 12))
+        lbl_proj.setFont(QFont("Arial", 14))
         self.sidebar_layout.addWidget(lbl_proj)
         
         # List of workflow buttons
@@ -882,9 +1056,26 @@ class OfflinePreparationStudio(QMainWindow):
         for i, step in enumerate(workflow_steps):
             btn = QPushButton(step)
             btn.setStyleSheet("""
-                QPushButton { text-align: left; padding: 10px; background-color: #ecf0f1; border: 1px solid #bdc3c7; border-radius: 4px; }
-                QPushButton:hover { background-color: #d5dbdb; }
-                QPushButton:checked { background-color: #3498db; color: white; font-weight: bold; }
+                QPushButton { 
+                    text-align: left; 
+                    padding: 12px; 
+                    background-color: #f8f9fa; 
+                    border: 1px solid #dee2e6; 
+                    border-radius: 5px; 
+                    font-size: 11pt;
+                    font-weight: 500;
+                    color: #2c3e50;
+                }
+                QPushButton:hover { 
+                    background-color: #e9ecef; 
+                    border: 1px solid #adb5bd;
+                }
+                QPushButton:checked { 
+                    background-color: #0d6efd; 
+                    color: white; 
+                    font-weight: bold;
+                    border: 1px solid #0d6efd;
+                }
             """)
             btn.setCheckable(True)
             if i == 0: btn.setChecked(True)
@@ -898,8 +1089,18 @@ class OfflinePreparationStudio(QMainWindow):
         self.sidebar_layout.addStretch()
         self.btn_clear_data = QPushButton("🗑️ Clear Entire Project")
         self.btn_clear_data.setStyleSheet("""
-            QPushButton { background-color: #e74c3c; color: white; padding: 15px; border-radius: 4px; font-weight: bold; }
-            QPushButton:hover { background-color: #c0392b; }
+            QPushButton { 
+                background-color: #dc3545; 
+                color: white; 
+                padding: 12px; 
+                border-radius: 5px; 
+                font-weight: bold; 
+                font-size: 10pt;
+                border: 1px solid #bb2d3b;
+            }
+            QPushButton:hover { 
+                background-color: #bb2d3b; 
+            }
         """)
         self.btn_clear_data.clicked.connect(self.clear_all_project_data)
         self.sidebar_layout.addWidget(self.btn_clear_data)
@@ -963,6 +1164,20 @@ class OfflinePreparationStudio(QMainWindow):
             self.action_clear_panel5()
             self.action_clear_panel6()
             self.action_clear_panel7()
+            
+            # Force garbage collection
+            gc.collect()
+    
+    def clear_rom_memory(self):
+        """MEMORY FIX: Clears ROM-related data before retraining to prevent crashes on repeated cycles."""
+        self.Phi = None
+        self.Phi_stress = None
+        self.K_rom = None
+        self.SnapshotMatrix = None
+        gc.collect()  # Force immediate garbage collection
+        
+        msg = "ROM data cleared from memory.\nSafe to retrain with heavy mesh density."
+        QMessageBox.information(None, "Memory Cleared", msg)
 
     # --- DEDICATED PANEL GRAPHICS CLEAR ACTIONS ---
     def action_clear_panel1(self):
@@ -1081,7 +1296,7 @@ class OfflinePreparationStudio(QMainWindow):
         top_layout.addLayout(vbox_apply)
         
         vbox_info = QVBoxLayout(); vbox_info.addWidget(QLabel("<b>Matrix Info:</b>"))
-        self.MatrixSizeTextArea = QTextEdit(); self.MatrixSizeTextArea.setReadOnly(True); self.MatrixSizeTextArea.setStyleSheet("font-family: Courier; background-color: #f4f4f4;")
+        self.MatrixSizeTextArea = QTextEdit(); self.MatrixSizeTextArea.setReadOnly(True); self.MatrixSizeTextArea.setStyleSheet("font-family: Courier; font-size: 12pt; background-color: #f4f4f4;")
         self.MatrixSizeTextArea.setMaximumHeight(45); self.MatrixSizeTextArea.setFixedWidth(150); vbox_info.addWidget(self.MatrixSizeTextArea)
         top_layout.addLayout(vbox_info); layout.addWidget(top_widget, 0)
         
@@ -1119,7 +1334,7 @@ class OfflinePreparationStudio(QMainWindow):
 
         left_layout.addWidget(QLabel("<b>Validation Summary</b>"))
         self.ValidationSummaryTextArea = QTextEdit(); self.ValidationSummaryTextArea.setReadOnly(True)
-        self.ValidationSummaryTextArea.setStyleSheet("font-family: Courier; font-size: 10pt; background-color: #f4f4f4;")
+        self.ValidationSummaryTextArea.setStyleSheet("font-family: Courier; font-size: 12pt; background-color: #f4f4f4;")
         left_layout.addWidget(self.ValidationSummaryTextArea, stretch=1)
 
         right = QWidget(); right_layout = QVBoxLayout(right)
@@ -1165,6 +1380,12 @@ class OfflinePreparationStudio(QMainWindow):
         self.num_snapshotsEditField = QLineEdit("12"); self.num_snapshotsEditField.setFixedWidth(100)
         input_layout.addWidget(self.num_snapshotsEditField); input_layout.addStretch()
         
+        # --- MEMORY FIX: Clear ROM data before retraining ---
+        btn_clear_rom = QPushButton("🧹 Clear ROM Memory")
+        btn_clear_rom.setStyleSheet("background-color: #e74c3c; color: white; font-weight: bold; padding: 10px 15px; border-radius: 5px;")
+        btn_clear_rom.clicked.connect(self.clear_rom_memory)
+        input_layout.addWidget(btn_clear_rom)
+        
         btn_train = QPushButton("Start ROM Training")
         btn_train.setStyleSheet("font-weight: bold; padding: 10px 20px; background-color: #2b5797; color: white; border-radius: 5px;")
         btn_train.clicked.connect(self.TrainButtonPushed); input_layout.addWidget(btn_train)
@@ -1179,7 +1400,7 @@ class OfflinePreparationStudio(QMainWindow):
         
         layout.addWidget(QLabel("<b>Training Log & Time:</b>"))
         self.TrainningTimeTextArea = QTextEdit(); self.TrainningTimeTextArea.setReadOnly(True)
-        self.TrainningTimeTextArea.setStyleSheet("font-family: Courier; font-size: 10pt; background-color: #f4f4f4;")
+        self.TrainningTimeTextArea.setStyleSheet("font-family: Courier; font-size: 12pt; background-color: #f4f4f4;")
         self.TrainningTimeTextArea.setMaximumHeight(150); layout.addWidget(self.TrainningTimeTextArea)
         
         layout.addWidget(QLabel("<b>ROM Invariance (Singular Value Decomposition)</b>"))
@@ -1215,7 +1436,7 @@ class OfflinePreparationStudio(QMainWindow):
         form.addRow(btn_clear_graphics)
 
         self.AccuracyResultsTextArea = QTextEdit(); self.AccuracyResultsTextArea.setReadOnly(True)
-        self.AccuracyResultsTextArea.setStyleSheet("font-family: Courier; font-size: 10pt; background-color: #f4f4f4;")
+        self.AccuracyResultsTextArea.setStyleSheet("font-family: Courier; font-size: 12pt; background-color: #f4f4f4;")
         form.addRow(self.AccuracyResultsTextArea)
 
         self.SaveButton = QPushButton("Save ROM to Disk")
@@ -1310,7 +1531,7 @@ class OfflinePreparationStudio(QMainWindow):
         num_hex8 = len(hex8_conn)
         edge_map = {}; mid_node_counter = len(hex8_nodes); mid_nodes_list = []
         connectivity = np.zeros((num_hex8, 20), dtype=int)
-        edges = np.array([[0,1], [1,2], [2,3], [3,0], [4,5], [5,6], [6,7], [7,4], [0,4], [1,5], [2,6], [3,7]])
+        edges = np.array([[0,1], [1,2], [0,2], [0,3], [1,3], [2,3]])
         
         for e in range(num_hex8):
             corners = hex8_conn[e, :]
@@ -1391,7 +1612,7 @@ class OfflinePreparationStudio(QMainWindow):
             if hasattr(self, 'define_loads_at_pos'):
                 point_loads = self.define_loads_at_pos(load_pos_meters, P_val)
                 self.loads['point_nodes'] = point_loads['point_nodes']
-                self.loads['point_load_values'] = point_loads['point_load_values']
+                self.loads['point_load_values'] = point_load_values
 
             dof_per_node = 3
             num_nodes = self.mesh_info['num_nodes']; num_elements = self.mesh_info['num_elements']
@@ -1440,8 +1661,8 @@ class OfflinePreparationStudio(QMainWindow):
                     num_vals = 6 * len(loc_array)
                     next_idx_B = curr_idx_B + num_vals
                     
-                    B_triplet_i[curr_idx_B:next_idx_B] = mesh_R.ravel(); B_triplet_j[curr_idx_B:next_idx_B] = mesh_C.ravel(); B_triplet_val[curr_idx_B:next_idx_B] = Be_gp.ravel()
-                    curr_idx_B = next_idx_B
+                    B_triplet_i[curr_idx_b:next_idx_b] = mesh_R.ravel(); B_triplet_j[curr_idx_b:next_idx_b] = mesh_C.ravel(); B_triplet_val[curr_idx_b:next_idx_b] = Be_gp.ravel()
+                    curr_idx_b = next_idx_b
                     
                 self.F_global[loc_array] += Fe
 
@@ -1910,9 +2131,18 @@ class OfflinePreparationStudio(QMainWindow):
                 self.ComputationalInfromationTextArea.setText("Error: Please apply Boundary Conditions first.")
                 return
 
+            # Show progress dialog for FEM solving
+            progress = QProgressDialog("Solving FEM System...", "Cancel", 0, 0, self)
+            progress.setWindowTitle("FEM Solver")
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setStyleSheet("QProgressDialog { background-color: white; }")
+            progress.show()
+            QApplication.processEvents()
+            
             solve_start = time.perf_counter()
             U_free = spsolve(self.K_reduced.tocsr(), self.F_reduced) 
             solve_cpu_time = time.perf_counter() - solve_start
+            progress.close()
             
             num_dof = self.K_global.shape[0]
             self.U_full = np.zeros(num_dof)
@@ -2081,7 +2311,7 @@ class OfflinePreparationStudio(QMainWindow):
             if num_gp == 8:
                 g_pts, _ = self.BuildHexaGauss(2)
                 Node_Loc = np.array([
-                    [-1,-1,-1], [1,-1,-1], [1,1,-1], [-1,1,-1], [-1,-1,1], [1,-1,1], [1,1,1], [-1,1,1],
+                    [-1,-1,-1], [1,-1,-1], [1,1,-1], [-1,1,-1], [-1,-1, 1], [1,-1, 1], [1,1, 1], [-1,1, 1],
                     [0,-1,-1], [1,0,-1], [0,1,-1], [-1,0,-1], [0,-1,1], [1,0,1], [0,1,1], [-1,0,1],
                     [-1,-1,0], [1,-1,0], [1,1,0], [-1,1,0]
                 ])
@@ -2280,10 +2510,9 @@ class OfflinePreparationStudio(QMainWindow):
         except:
             for key in list(targetAxes.scalar_bars.keys()): targetAxes.remove_scalar_bar(key)
 
-        targetAxes.add_mesh(grid_undeformed, name='base_wireframe', style='wireframe', color='gray', opacity=0.4, line_width=1.0)
-        
-        # Notice clim=c_limits is used here!
-        targetAxes.add_mesh(grid_deformed, name='active_solid', scalars="Stress (MPa)", cmap="jet", clim=c_limits, show_edges=True, edge_color='black', line_width=0.1, scalar_bar_args=sargs,reset_camera=False)
+        # FIXED: Added reset_camera=False to the wireframe mesh as well!
+        targetAxes.add_mesh(grid_undeformed, name='base_wireframe', style='wireframe', color='gray', opacity=0.4, line_width=1.0, reset_camera=False)
+        targetAxes.add_mesh(grid_deformed, name='active_solid', scalars="Stress (MPa)", cmap="jet", clim=c_limits, show_edges=True, edge_color='black', line_width=0.1, scalar_bar_args=sargs, reset_camera=False)                     
         targetAxes.add_text(title_str, name='active_text', font_size=10, color='black')
         
         if not hasattr(targetAxes, 'axes_widget_added'):
@@ -2295,7 +2524,6 @@ class OfflinePreparationStudio(QMainWindow):
             targetAxes.view_isometric()
             targetAxes.reset_camera(bounds=fixed_bounds)
             targetAxes.camera_initialized = True
-
         elif saved_cam is not None:
             # Force the camera back to your manual zoom
             targetAxes.camera_position = saved_cam
@@ -2384,11 +2612,18 @@ class OfflinePreparationStudio(QMainWindow):
             num_snapshots = int(self.num_snapshotsEditField.text())
             x_positions = np.linspace(0.01 * self.geometry['Lx'], 0.99 * self.geometry['Lx'], num_snapshots)
             
-            free_dofs = self.bc_info['free_dofs_indices']; num_free_dof = len(free_dofs); num_total_dof = self.K_global.shape[0]; num_nodes = self.node_coords.shape[0]
+            free_dofs = self.bc_info['free_dofs_indices']; num_free_dof = len(free_dof)
             self.SnapshotMatrix = np.zeros((num_free_dof, num_snapshots))
             
             self.TrainningTimeTextArea.setText("*** Starting ROM Training ***\n"); print("Starting ROM Training...")
             K_reduced_csr = self.K_reduced.tocsr()
+            
+            # Show progress dialog for snapshot collection
+            progress = QProgressDialog("Collecting Snapshots...", "Cancel", 0, num_snapshots, self)
+            progress.setWindowTitle("ROM Training - Snapshot Stage")
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setStyleSheet("QProgressDialog { background-color: white; }")
+            progress.show()
             
             for i in range(num_snapshots):
                 load_val = float(self.LoadValueNEditField.text())
@@ -2404,13 +2639,21 @@ class OfflinePreparationStudio(QMainWindow):
                 
                 new_entry = f"Snap {i+1}: {elapsedTime:.4f}s at {x_positions[i]:.2f}m\n"
                 current_text = self.TrainningTimeTextArea.toPlainText()
-                self.TrainningTimeTextArea.setText(new_entry + current_text); QApplication.processEvents() 
+                self.TrainningTimeTextArea.setText(new_entry + current_text)
+                progress.setValue(i + 1)
+                QApplication.processEvents() 
                 self.SnapshotMatrix[:, i] = U_free_i
                 
+            progress.close()
+            
             print("Performing Singular Value Decomposition (SVD)...")
             U_svd, S_disp, Vt = np.linalg.svd(self.SnapshotMatrix, full_matrices=False)
             self.Phi = U_svd; energy_disp = S_disp**2 
             cum_energy_disp = np.cumsum(energy_disp) / np.sum(energy_disp) * 100.0
+            
+            # MEMORY CLEANUP: Delete temporary large matrices
+            del self.SnapshotMatrix, U_svd, Vt
+            gc.collect()  # Force garbage collection for heavy memory usage
             
             fig = self.UIAxes8.figure if hasattr(self.UIAxes8, 'figure') else self.UIAxes8; fig.clf()
             ax1 = fig.add_subplot(111); ax2 = ax1.twinx() 
@@ -2433,15 +2676,30 @@ class OfflinePreparationStudio(QMainWindow):
             msg = "Generating Exact Stress Modes...\n"; current_text = self.TrainningTimeTextArea.toPlainText()
             self.TrainningTimeTextArea.setText(msg + current_text); QApplication.processEvents()
             
+            # Show progress dialog for stress mode generation
+            stress_progress = QProgressDialog("Computing Stress Modes...", "Cancel", 0, num_modes, self)
+            stress_progress.setWindowTitle("ROM Training - Stress Stage")
+            stress_progress.setWindowModality(Qt.WindowModality.WindowModal)
+            stress_progress.setStyleSheet("QProgressDialog { background-color: white; }")
+            stress_progress.show()
+            
             for m in range(num_modes):
                 U_mode_full = np.zeros(num_total_dof); U_mode_full[free_dofs] = self.Phi[:, m]
                 Sigma_mode = self.PostProcess_Stress_3Dsparse(self.B_global, self.D_mat, U_mode_full, self.node_coords, self.element_connectivity, self.element_type)
                 self.Phi_stress[:, m] = Sigma_mode.flatten()
+                stress_progress.setValue(m + 1)
+                QApplication.processEvents()
+            
+            stress_progress.close()
                 
             success_msg = f"Training Complete!\nModes retained: {n_modes_disp}\nEnergy: {cum_energy_disp[n_modes_disp-1]:.4f}%"
             QMessageBox.information(None, "ROM Success", success_msg)
+            
+            # MEMORY CLEANUP: Force garbage collection after heavy computations
+            gc.collect()
         except Exception as e:
             QMessageBox.critical(None, "Training Error", f"Error:\n{str(e)}\n\n{traceback.format_exc()}")
+            gc.collect()  # Clean up even on error
         finally:
             self.unlock_ui() 
  
@@ -2451,6 +2709,14 @@ class OfflinePreparationStudio(QMainWindow):
             x_pos = (self.ValidationLoadPositionSlider.value() / 100.0) * self.geometry['Lx'] 
             P_val = float(self.ValidationLoadNEditField.text())
             stress_type = self.TypeofStressesDropDown_2.currentText()
+            
+            # Show progress dialog for validation
+            progress = QProgressDialog("Validating FEM vs ROM...", "Cancel", 0, 4, self)
+            progress.setWindowTitle("ROM Validation")
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setStyleSheet("QProgressDialog { background-color: white; }")
+            progress.show()
+            progress.setValue(0)
             
             self.AccuracyResultsTextArea.setText("*** Starting Accuracy Check ***\n"); QApplication.processEvents()
             
@@ -2464,22 +2730,26 @@ class OfflinePreparationStudio(QMainWindow):
             t0 = time.perf_counter()
             U_free_fem = spla.spsolve(self.K_reduced.tocsr(), F_red)
             time_fem_solve = time.perf_counter() - t0
-        
+            progress.setValue(1)
+            
             num_dof = self.K_global.shape[0]; U_full_fem = np.zeros(num_dof); U_full_fem[free_dofs] = U_free_fem
-        
+            
             t0 = time.perf_counter()
             Sigma_fem = self.PostProcess_Stress_3Dsparse(self.B_global, self.D_mat, U_full_fem, self.node_coords, self.element_connectivity, self.element_type)
             time_fem_stress = time.perf_counter() - t0
             self.plot_stresses(Sigma_fem, stress_type, self.UIAxes9, U_full_fem, self.scale_factor)
+            progress.setValue(2)
+            QApplication.processEvents()
             
             t0 = time.perf_counter()
             F_rom = self.Phi.T @ F_red
             alpha = np.linalg.solve(self.K_rom, F_rom) 
             U_free_rom_proj = self.Phi @ alpha
             time_rom_solve = time.perf_counter() - t0
-        
+            progress.setValue(3)
+            
             self.U_full_rom = np.zeros(num_dof); self.U_full_rom[free_dofs] = U_free_rom_proj
-        
+            
             t0 = time.perf_counter()
             Sigma_rom_flat = self.Phi_stress @ alpha
             num_nodes = self.node_coords.shape[0]
@@ -2487,6 +2757,8 @@ class OfflinePreparationStudio(QMainWindow):
             time_rom_stress = time.perf_counter() - t0
             
             self.plot_stresses(Sigma_rom, stress_type, self.UIAxes10, self.U_full_rom, self.scale_factor)
+            progress.setValue(4)
+            progress.close()
             
             norm_U_fem = np.linalg.norm(U_free_fem)
             rel_error_U = (np.linalg.norm(U_free_fem - U_free_rom_proj) / max(norm_U_fem, 1e-12)) * 100.0
@@ -2514,6 +2786,7 @@ class OfflinePreparationStudio(QMainWindow):
                 f"Relative Error: {rel_error_Stress:.4f} %"
             )
             self.AccuracyResultsTextArea.setText(results_text)
+            QApplication.processEvents()
         except Exception as e:
             QMessageBox.critical(None, "Validation Error", f"Error:\n{str(e)}\n\n{traceback.format_exc()}")
         finally:
@@ -2580,6 +2853,9 @@ class OfflinePreparationStudio(QMainWindow):
         if hasattr(self, 'DT_Bank'): self.DT_Bank = ROM_Bank
         msg = f"ROM '{rom_label}' successfully added to:\n{save_filename}\n\nTotal Models in Bank: {len(ROM_Bank)}"
         QMessageBox.information(None, "Save Successful", msg)
+        
+        # MEMORY CLEANUP: Force garbage collection after large pickle operations
+        gc.collect()
 
 
     def ClearBankButtonPushed(self):
@@ -2749,35 +3025,6 @@ class ROMVisualizerWindow(QMainWindow):
         self.SectionSlider.setRange(0, 100); self.SectionSlider.setValue(50)
         sec_ctrl_lay.addWidget(self.lbl_sec); sec_ctrl_lay.addWidget(self.SectionSlider)
         layout_2d.addLayout(sec_ctrl_lay)
-        
-        # --- NEW: Styled Frames for Visual Divisions ---
-        def wrap_canvas(interactor):
-            frame = QFrame()
-            frame.setStyleSheet("QFrame { border: 2px solid #7f8c8d; border-radius: 4px; background-color: white; }")
-            lay = QVBoxLayout(frame)
-            lay.setContentsMargins(2, 2, 2, 2)
-            lay.addWidget(interactor)
-            return frame
-
-        self.UIAxes_2D_Top = QtInteractor()
-        self.UIAxes_2D_Front = QtInteractor()
-        self.UIAxes_2D_Sec = QtInteractor()
-        
-        grid_2d = QGridLayout()
-        grid_2d.setSpacing(12) # Adds physical gaps between the views!
-        
-        # Top View (Large, Top Half) -> Spans 2 rows, 3 columns
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Front), 0, 0, 2, 3) 
-        # Front View (Wide, Bottom Left) -> Spans 1 row, 2 columns
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Top), 2, 0, 1, 2) 
-        # Section View (Small Corner, Bottom Right) -> Spans 1 row, 1 column
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Sec), 2, 2, 1, 1) 
-        
-        grid_2d.setRowStretch(0, 1); grid_2d.setRowStretch(1, 1); grid_2d.setRowStretch(2, 1)
-        grid_2d.setColumnStretch(0, 1); grid_2d.setColumnStretch(1, 1); grid_2d.setColumnStretch(2, 1)
-        
-        layout_2d.addLayout(grid_2d)
-        self.graphics_tabs.addTab(self.tab_2d, "2D Sliced Orthographic Views")
         
     
         # --- 4. Far Right: 1D Engineering Line Plots ---
@@ -3136,7 +3383,6 @@ class ROMVisualizerWindow(QMainWindow):
 
         self.UIAxes_2D_Sec.add_text(f"Section Cut (YZ) | X={closest_x:.2f}m", name='txt_sec', font_size=10, color='black')
 
-
         # --- INITIALIZE CAMERAS ONLY ONCE ON FIRST RUN ---
         if not hasattr(self, '_2d_cams_initialized'):
             self.UIAxes_2D_Top.view_xy(negative=("Bottom" in top_choice))
@@ -3240,6 +3486,9 @@ class WorkbenchLaunchpad(QMainWindow):
         self.setWindowTitle("Digital Twin for Structure Bending Test Project Schematic")
         self.setGeometry(100, 100, 1000, 750) # Expanded to fit the new professional layout
         
+        # Show splash screen with loading bar
+        self.show_splash_screen()
+        
         self.sm = SensorManager(port='COM4', baud=115200)
         self.offline_studio = OfflinePreparationStudio() 
         self.visualizer_window = None 
@@ -3291,36 +3540,115 @@ class WorkbenchLaunchpad(QMainWindow):
         )
         QMessageBox.about(self, "About System", about_text)
 
+    def show_splash_screen(self):
+        """Display splash screen with logo and loading bar."""
+        splash_dialog = QDialog(None, Qt.WindowType.FramelessWindowHint)
+        splash_dialog.setStyleSheet("background-color: #2c3e50; border: 3px solid #3498db; border-radius: 10px;")
+        splash_dialog.setFixedSize(550, 400) # Increased height for logo
+        
+        layout = QVBoxLayout(splash_dialog)
+        layout.setContentsMargins(30, 20, 30, 30)
+        
+        # --- NEW: Logo Image ---
+        logo_img = QLabel()
+        logo_pix = QPixmap("CSE IMAGE.png")
+        if not logo_pix.isNull():
+            logo_img.setPixmap(logo_pix.scaled(400, 150, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            logo_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(logo_img)
+        
+        # Title
+        title = QLabel("Digital Twin Workbench - Structure Bending Test")
+        title.setFont(QFont("Arial", 20, QFont.Weight.Bold))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("color: #ecf0f1; margin-top: 10px;")
+        layout.addWidget(title)
+        
+        # Subtitle
+        subtitle = QLabel("Structure Bending Test - FEM/ROM Platform")
+        subtitle.setFont(QFont("Arial", 10))
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setStyleSheet("color: #bdc3c7;")
+        layout.addWidget(subtitle)
+        
+        # Loading bar
+        progress = QProgressBar()
+        progress.setRange(0, 100)
+        progress.setStyleSheet("""
+            QProgressBar { border: 2px solid #ecf0f1; border-radius: 5px; background-color: #34495e; text-align: center; color: white;}
+            QProgressBar::chunk { background-color: #3498db; }
+        """)
+        layout.addWidget(progress)
+        
+        # Status text
+        status_lbl = QLabel("Initializing System...")
+        status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_lbl.setStyleSheet("color: #2ecc71; font-weight: bold;")
+        layout.addWidget(status_lbl)
+        
+        splash_dialog.move(QApplication.primaryScreen().geometry().center() - splash_dialog.rect().center())
+        splash_dialog.show()
+        
+        # Simulate loading
+        for i in range(101):
+            progress.setValue(i)
+            if i < 30: status_lbl.setText(f"Loading Modules... {i}%")
+            elif i < 70: status_lbl.setText(f"Connecting Hardware... {i}%")
+            else: status_lbl.setText(f"System Ready! {i}%")
+            QApplication.processEvents()
+            time.sleep(0.02)
+        
+        splash_dialog.close()
+
     def build_ui(self):
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
+        self.central_widget.setStyleSheet(f"background-color: {ProfessionalTheme.BACKGROUND_LIGHT};")
         self.main_layout = QVBoxLayout(self.central_widget)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
         
-        # --- TITLE HEADER ---
-        title = QLabel("PROJECT SCHEMATIC")
-        title.setFont(QFont("Arial", 20, QFont.Weight.Bold))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.main_layout.addWidget(title)
-        self.main_layout.addSpacing(10)
+        # --- PROFESSIONAL HEADER WITH LOGO ---
+        header = ProfessionalTheme.create_header_widget("Digital Twin Workbench - Structure Bending Test")
+        self.main_layout.addWidget(header)
         
         # --- HORIZONTAL SPLITTER (Sidebar + Schematic) ---
         self.top_splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # ====================================================================
-        # 1. LEFT SIDEBAR (Status Monitor + Documentation)
+        # 1. LEFT SIDEBAR (Logo + Status + Documentation)
         # ====================================================================
         sidebar_widget = QWidget()
+        sidebar_widget.setStyleSheet(f"background-color: {ProfessionalTheme.BACKGROUND_LIGHT}; border-right: 1px solid {ProfessionalTheme.BORDER_COLOR};")
         sidebar_layout = QVBoxLayout(sidebar_widget)
-        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # --- App Logo at top of Sidebar ---
+        side_logo = QLabel()
+        side_pix = QPixmap("CSE IMAGE.png")
+        if not side_pix.isNull():
+            logo_frame = QFrame()
+            logo_frame.setStyleSheet(f"background-color: white; border: 2px solid {ProfessionalTheme.ACCENT_BLUE}; border-radius: 8px; padding: 5px;")
+            logo_frame_layout = QVBoxLayout(logo_frame)
+            side_logo.setPixmap(side_pix.scaled(200, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            side_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            logo_frame_layout.addWidget(side_logo)
+            sidebar_layout.addWidget(logo_frame)
+        
+        sidebar_layout.addSpacing(15)
 
         # A. System Status Monitor
         status_grp = QGroupBox("System Status Monitor")
-        status_grp.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #bdc3c7; border-radius: 5px; margin-top: 1ex; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px; }")
+        ProfessionalTheme.apply_professional_panel_style(status_grp)
         status_lay = QVBoxLayout(status_grp)
         
         self.lbl_rom_status = QLabel("🔴 ROM Data: Not Loaded")
         self.lbl_hw_status = QLabel("🔴 Hardware: Disconnected")
         self.lbl_active_module = QLabel("🔵 Active Module: None")
+        
+        # Style status labels
+        status_label_style = f"font-weight: bold; color: {ProfessionalTheme.TEXT_DARK}; padding: 4px; border-left: 4px solid {ProfessionalTheme.ACCENT_BLUE}; background-color: {ProfessionalTheme.BACKGROUND_LIGHT};"
+        for lbl in [self.lbl_rom_status, self.lbl_hw_status, self.lbl_active_module]:
+            lbl.setStyleSheet(status_label_style)
         
         status_lay.addWidget(self.lbl_rom_status)
         status_lay.addWidget(self.lbl_hw_status)
@@ -3328,21 +3656,22 @@ class WorkbenchLaunchpad(QMainWindow):
         status_lay.addWidget(self.lbl_active_module)
         
         btn_refresh = QPushButton("↻ Refresh Status")
+        btn_refresh.setStyleSheet(f"QPushButton {{ background-color: {ProfessionalTheme.ACCENT_BLUE}; color: white; font-weight: bold; padding: 6px; border-radius: 4px; }}")
         btn_refresh.clicked.connect(self.update_system_status)
         status_lay.addStretch()
         status_lay.addWidget(btn_refresh)
 
         # B. Quick Documentation Box
         docs_grp = QGroupBox("Lab Documentation")
-        docs_grp.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #bdc3c7; border-radius: 5px; margin-top: 1ex; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px; }")
+        ProfessionalTheme.apply_professional_panel_style(docs_grp)
         docs_lay = QVBoxLayout(docs_grp)
         
         btn_student_doc = QPushButton("📘 Student Lab Manual")
-        btn_student_doc.setStyleSheet("text-align: left; padding: 5px;")
+        btn_student_doc.setStyleSheet(f"QPushButton {{ background-color: {ProfessionalTheme.INFO_PURPLE}; color: white; font-weight: bold; padding: 8px; border-radius: 4px; text-align: left; }}")
         btn_student_doc.clicked.connect(self.open_student_manual)
         
         btn_instruct_doc = QPushButton("📙 Instructor Manual")
-        btn_instruct_doc.setStyleSheet("text-align: left; padding: 5px;")
+        btn_instruct_doc.setStyleSheet(f"QPushButton {{ background-color: {ProfessionalTheme.PRIMARY_BLUE}; color: white; font-weight: bold; padding: 8px; border-radius: 4px; text-align: left; }}")
         btn_instruct_doc.clicked.connect(self.open_instructor_manual)
         
         docs_lay.addWidget(btn_student_doc)
@@ -3357,52 +3686,111 @@ class WorkbenchLaunchpad(QMainWindow):
         # ====================================================================
         # 2. RIGHT PANEL (The Schematic Flowchart)
         # ====================================================================
-        schematic_grp = QGroupBox("Data Flow & Module Execution")
-        schematic_grp.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #bdc3c7; border-radius: 5px; margin-top: 1ex; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px; }")
-        schematic_grid = QGridLayout(schematic_grp)
-        schematic_grid.setSpacing(10)
+        schematic_grp = QGroupBox("Project Schematic: Data Flow & Execution")
         
-        base_style = """
-            QPushButton { color: white; font-size: 13px; font-weight: bold; padding: 12px; border-radius: 4px; border: 2px solid #2c3e50; text-align: center;}
-            QPushButton:hover { border: 2px solid #ecf0f1; }
+        # Professional schematic styling with gradient background
+        schematic_grp.setStyleSheet(f"""
+            QGroupBox {{
+                font-weight: bold; 
+                border: 2px solid {ProfessionalTheme.ACCENT_BLUE}; 
+                border-radius: 8px; 
+                margin-top: 1.5ex;
+                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
+                    stop:0 {ProfessionalTheme.BACKGROUND_LIGHT}, 
+                    stop:1 #ffffff);
+                padding: 5px;
+            }} 
+            QGroupBox::title {{ 
+                subcontrol-origin: margin; 
+                left: 15px; 
+                padding: 0 5px;
+                color: {ProfessionalTheme.PRIMARY_BLUE};
+                font-weight: bold;
+            }}
+        """)
+        
+        schematic_grid = QGridLayout(schematic_grp)
+        schematic_grid.setSpacing(15)
+        schematic_grid.setContentsMargins(20, 30, 20, 20)
+        
+        # Professional Button Styles
+        base_style = f"""
+            QPushButton {{ 
+                color: white; 
+                font-size: 13px; 
+                font-weight: bold; 
+                padding: 12px; 
+                border-radius: 6px; 
+                border: 2px solid {ProfessionalTheme.DARK_BLUE};
+                min-height: 80px;
+            }}
+            QPushButton:hover {{ 
+                border: 2px solid {ProfessionalTheme.TEXT_LIGHT};
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #34495e, stop:1 #2c3e50);
+            }}
+            QPushButton:pressed {{
+                background-color: {ProfessionalTheme.DARK_BLUE};
+                border: 2px solid white;
+            }}
         """
         
-        self.btn_offline = QPushButton("🛠️ Module 1: Offline Studio\n[Geometry, Mesh, ROM]")
-        self.btn_offline.setStyleSheet(base_style.replace("color: white;", "background-color: #2980b9; color: white;"))
+        # Module Buttons with specific colors
+        self.btn_offline = QPushButton("🛠️ Module 1\nOffline Studio")
+        self.btn_offline.setStyleSheet(base_style + f"QPushButton {{ background-color: {ProfessionalTheme.PRIMARY_BLUE}; }}")
         self.btn_offline.clicked.connect(self.launch_offline_studio)
         
-        self.btn_vis = QPushButton("🔍 Module 2: ROM Visualizer\n[Offline Simulation]")
-        self.btn_vis.setStyleSheet(base_style.replace("color: white;", "background-color: #8e44ad; color: white;"))
+        self.btn_vis = QPushButton("🔍 Module 2\nROM Visualizer")
+        self.btn_vis.setStyleSheet(base_style + f"QPushButton {{ background-color: {ProfessionalTheme.INFO_PURPLE}; }}")
         self.btn_vis.clicked.connect(self.launch_rom_visualizer)
         
-        self.btn_calib = QPushButton("📡 Module 3: Sensor Calibration\n[Hardware Setup]")
-        self.btn_calib.setStyleSheet(base_style.replace("color: white;", "background-color: #d35400; color: white;"))
+        self.btn_calib = QPushButton("📡 Module 3\nSensor Calibration")
+        self.btn_calib.setStyleSheet(base_style + f"QPushButton {{ background-color: {ProfessionalTheme.WARNING_ORANGE}; }}")
         self.btn_calib.clicked.connect(self.launch_calibration)
         
-        self.btn_live = QPushButton("🚀 Module 4: Online Digital Twin\n[Real-Time Sensor Fusion]")
-        self.btn_live.setStyleSheet(base_style.replace("color: white;", "background-color: #27ae60; color: white;"))
+        self.btn_live = QPushButton("🚀 Module 4\nOnline Digital Twin")
+        self.btn_live.setStyleSheet(base_style + f"QPushButton {{ background-color: {ProfessionalTheme.SUCCESS_GREEN}; border: 2px solid #145a32; }}")
+        self.btn_live.setMinimumHeight(100)
         self.btn_live.clicked.connect(self.launch_live_twin)
 
-        def make_arrow(text, align):
+        # Helper for modern schematic arrows
+        def make_connector(text):
             lbl = QLabel(text)
-            lbl.setStyleSheet("font-size: 24px; font-weight: bold; color: #7f8c8d;")
+            lbl.setStyleSheet("font-size: 40px; font-weight: bold; color: #3498db;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            return lbl
+        
+        # Column and Row Stretching for centering
+        for i in range(3): schematic_grid.setColumnStretch(i, 1)
+        for i in range(5): schematic_grid.setRowStretch(i, 1)
+
+        self.top_splitter.addWidget(schematic_grp)
+
+        def make_connector(text, align):
+            lbl = QLabel(text)
+            lbl.setStyleSheet("font-size: 56px; font-weight: 900; color: #1e5a96;")
             lbl.setAlignment(align)
+            lbl.setMinimumHeight(60)
             return lbl
 
         # Grid Layout Placement
         schematic_grid.addWidget(self.btn_offline, 0, 0)
         schematic_grid.addWidget(self.btn_calib, 0, 2)
-        schematic_grid.addWidget(make_arrow("↓", Qt.AlignmentFlag.AlignCenter), 1, 0)
-        schematic_grid.addWidget(make_arrow("↓", Qt.AlignmentFlag.AlignCenter), 1, 2)
+        schematic_grid.addWidget(make_connector("⬇", Qt.AlignmentFlag.AlignCenter), 1, 0)
+        schematic_grid.addWidget(make_connector("⬇", Qt.AlignmentFlag.AlignCenter), 1, 2)
         schematic_grid.addWidget(self.btn_vis, 2, 0)
-        schematic_grid.addWidget(make_arrow("↓", Qt.AlignmentFlag.AlignCenter), 2, 2)
-        schematic_grid.addWidget(make_arrow("↘", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom), 3, 0)
-        schematic_grid.addWidget(make_arrow("↙", Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom), 3, 2)
+        schematic_grid.addWidget(make_connector("⬇", Qt.AlignmentFlag.AlignCenter), 2, 2)
+        schematic_grid.addWidget(make_connector("╚", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom), 3, 0)
+        schematic_grid.addWidget(make_connector("╝", Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom), 3, 2)
         schematic_grid.addWidget(self.btn_live, 4, 1)
         
-        schematic_grid.setColumnStretch(0, 2)
-        schematic_grid.setColumnStretch(1, 3)
-        schematic_grid.setColumnStretch(2, 2)
+        schematic_grid.setColumnStretch(0, 1)
+        schematic_grid.setColumnStretch(1, 1)
+        schematic_grid.setColumnStretch(2, 1)
+        schematic_grid.setRowStretch(0, 1)
+        schematic_grid.setRowStretch(1, 1)
+        schematic_grid.setRowStretch(2, 1)
+        schematic_grid.setRowStretch(3, 1)
+        schematic_grid.setRowStretch(4, 1)
         
         self.top_splitter.addWidget(schematic_grp)
         self.top_splitter.setSizes([250, 750]) # Sidebar 25%, Schematic 75%
@@ -3411,11 +3799,11 @@ class WorkbenchLaunchpad(QMainWindow):
         # 3. BOTTOM TERMINAL CONSOLE
         # ====================================================================
         console_grp = QGroupBox("System Output Console")
-        console_grp.setStyleSheet("QGroupBox { font-weight: bold; }")
+        ProfessionalTheme.apply_professional_panel_style(console_grp)
         console_lay = QVBoxLayout(console_grp)
         self.console_output = QTextEdit()
         self.console_output.setReadOnly(True)
-        self.console_output.setStyleSheet("background-color: #1e1e1e; color: #00ff00; font-family: Consolas, Courier New, monospace; font-size: 12px;")
+        self.console_output.setStyleSheet(f"background-color: {ProfessionalTheme.CONSOLE_BG}; color: {ProfessionalTheme.CONSOLE_TEXT}; font-family: Consolas, 'Courier New', monospace; font-size: 11px; border: 1px solid {ProfessionalTheme.BORDER_COLOR}; border-radius: 4px;")
         console_lay.addWidget(self.console_output)
 
         # Main Vertical Splitter (Top Panels vs Bottom Console)
