@@ -1600,6 +1600,13 @@ class OfflinePreparationStudio(QMainWindow):
     def ApplyLoadButtonPushed(self):
         self.lock_ui() 
         try:
+            # CRITICAL FIX: Clear OLD ROM data before applying new BC to prevent state contamination
+            # This prevents crashes when switching between different boundary conditions repeatedly
+            self.Phi = None; self.Phi_stress = None; self.K_rom = None; self.SnapshotMatrix = None
+            # Also clear B_global to prevent dense mesh memory bloat during repeated operations
+            self.B_global = None
+            gc.collect()
+            
             if not hasattr(self, 'geometry') or 'Lx' not in self.geometry:
                 QMessageBox.warning(None, "Missing Data", "Geometry not found! Please generate the mesh in Tab 1 first.")
                 return
@@ -1613,7 +1620,7 @@ class OfflinePreparationStudio(QMainWindow):
             if hasattr(self, 'define_loads_at_pos'):
                 point_loads = self.define_loads_at_pos(load_pos_meters, P_val)
                 self.loads['point_nodes'] = point_loads['point_nodes']
-                self.loads['point_load_values'] = point_load_values
+                self.loads['point_load_values'] = point_loads['point_load_values']
 
             dof_per_node = 3
             num_nodes = self.mesh_info['num_nodes']; num_elements = self.mesh_info['num_elements']
@@ -1662,8 +1669,8 @@ class OfflinePreparationStudio(QMainWindow):
                     num_vals = 6 * len(loc_array)
                     next_idx_B = curr_idx_B + num_vals
                     
-                    B_triplet_i[curr_idx_b:next_idx_b] = mesh_R.ravel(); B_triplet_j[curr_idx_b:next_idx_b] = mesh_C.ravel(); B_triplet_val[curr_idx_b:next_idx_b] = Be_gp.ravel()
-                    curr_idx_b = next_idx_b
+                    B_triplet_i[curr_idx_B:next_idx_B] = mesh_R.ravel(); B_triplet_j[curr_idx_B:next_idx_B] = mesh_C.ravel(); B_triplet_val[curr_idx_B:next_idx_B] = Be_gp.ravel()
+                    curr_idx_B = next_idx_B
                     
                 self.F_global[loc_array] += Fe
 
@@ -1687,6 +1694,7 @@ class OfflinePreparationStudio(QMainWindow):
                 self.K_reduced, self.F_reduced, fixed_dofs, free_dofs = self.boundary_conditions(self.K_global, self.F_global, self.node_coords, self.beam_type)
             else:
                 fixed_dofs = np.array([]); free_dofs = np.arange(num_dof)
+                self.K_reduced = self.K_global; self.F_reduced = self.F_global
 
             self.bc_info = {'total_dofs': num_dof, 'fixed_dofs': len(fixed_dofs), 'free_dofs': len(free_dofs),
                             'fixed_dofs_indices': fixed_dofs, 'free_dofs_indices': free_dofs, 'fixed_dofs_values': np.zeros(len(fixed_dofs))}
@@ -2022,7 +2030,13 @@ class OfflinePreparationStudio(QMainWindow):
         num_total = K_global.shape[0]
         free_dofs = np.setdiff1d(np.arange(num_total), fixed_dofs)
         
-        K_reduced = K_global[np.ix_(free_dofs, free_dofs)]
+        # CRITICAL FIX: Handle sparse matrix extraction correctly
+        if sp.issparse(K_global):
+            K_global_csr = K_global.tocsr()
+            K_reduced = K_global_csr[free_dofs, :][:, free_dofs].tocsr()
+        else:
+            K_reduced = K_global[np.ix_(free_dofs, free_dofs)]
+        
         F_reduced = F_global[free_dofs]
         
         print(f"   BC Applied ({beam_type}): {len(fixed_dofs)} DOFs fixed. Reduced system: {K_reduced.shape[0]} x {K_reduced.shape[1]}")
@@ -2361,63 +2375,73 @@ class OfflinePreparationStudio(QMainWindow):
         if hasattr(fig, 'canvas'): fig.canvas.draw_idle()
 
     def plot_3D_Validation(self, targetAxes):
-        targetAxes.clear() 
-        if not hasattr(self, 'U_full') or not hasattr(self, 'Sigma_Final2'):
-            print("Validation data not found. Run 3D FEM solve first.")
-            return
-            
-        if len(self.node_coords) != len(self.Sigma_Final2):
-            print("CRITICAL ERROR: Mesh size and Validation Stress arrays do not match!")
-            return
-        
-        U_nodes = self.U_full.reshape(-1, 3)
-        max_u = np.max(np.abs(self.U_full))
-        
-        scale = (self.geometry['Lx'] * 0.15) / max(max_u, 1e-9) 
-        warped_coords = self.node_coords + (U_nodes * scale)
-        
-        if 'Hexa' in self.element_type:
-            n_vis = 8
-            vtk_type = pv.CellType.HEXAHEDRON
-        else:
-            n_vis = 4
-            vtk_type = pv.CellType.TETRA
-            
-        vis_connectivity = self.element_connectivity[:, :n_vis]
-        cells_dict = {vtk_type: vis_connectivity}
-        
-        # --- CRASH FIX: SOLID GRID (NO extract_surface) ---
-        grid = pv.UnstructuredGrid(cells_dict, warped_coords)
-        
-        stress_bending_mpa = self.Sigma_Final2[:, 0] / 1e6
-        stress_shear_mpa = self.Sigma_Final2[:, 5] / 1e6
-        
-        sargs = dict(title_font_size=12, label_font_size=10, shadow=False, n_labels=5, 
-                     fmt="%.1f", vertical=True, position_x=0.82, position_y=0.1, height=0.75, width=0.1)
+        try:
+            try:
+                targetAxes.clear()
+            except Exception:
+                pass
 
-        targetAxes.subplot(0, 0)
-        
-        grid_top = grid.copy()
-        grid_top.point_data["Bending Stress (MPa)"] = stress_bending_mpa
-        
-        targetAxes.add_mesh(grid_top, name='val_bending', scalars="Bending Stress (MPa)", 
-                            cmap="jet", show_edges=True, edge_color='black', line_width=0.1, scalar_bar_args=sargs)
-                            
-        targetAxes.add_text("3D FEA: Bending Stress XX [MPa]", name='val_bend_txt', font_size=10, color='black')
-        targetAxes.view_isometric(); targetAxes.add_axes(); targetAxes.reset_camera()
-        
-        targetAxes.subplot(1, 0)
-        
-        grid_bot = grid.copy()
-        grid_bot.point_data["Shear Stress XZ (MPa)"] = stress_shear_mpa
-        
-        targetAxes.add_mesh(grid_bot, name='val_shear', scalars="Shear Stress XZ (MPa)", 
-                            cmap="jet", show_edges=True, edge_color='black', line_width=0.1, scalar_bar_args=sargs)
-                            
-        targetAxes.add_text("3D FEA: Shear Stress XZ [MPa]", name='val_shear_txt', font_size=10, color='black')
-        targetAxes.view_isometric(); targetAxes.add_axes(); targetAxes.reset_camera()
-        
-        targetAxes.update()
+            if not hasattr(self, 'U_full') or not hasattr(self, 'Sigma_Final2'):
+                print("Validation data not found. Run 3D FEM solve first.")
+                return
+                
+            if len(self.node_coords) != len(self.Sigma_Final2):
+                print("CRITICAL ERROR: Mesh size and Validation Stress arrays do not match!")
+                return
+            
+            U_nodes = self.U_full.reshape(-1, 3)
+            max_u = np.max(np.abs(self.U_full))
+            
+            scale = (self.geometry['Lx'] * 0.15) / max(max_u, 1e-9) 
+            warped_coords = self.node_coords + (U_nodes * scale)
+            
+            if 'Hexa' in self.element_type:
+                n_vis = 8
+                vtk_type = pv.CellType.HEXAHEDRON
+            else:
+                n_vis = 4
+                vtk_type = pv.CellType.TETRA
+                
+            vis_connectivity = self.element_connectivity[:, :n_vis]
+            cells_dict = {vtk_type: vis_connectivity}
+            
+            grid = pv.UnstructuredGrid(cells_dict, warped_coords)
+            
+            stress_bending_mpa = self.Sigma_Final2[:, 0] / 1e6
+            stress_shear_mpa = self.Sigma_Final2[:, 5] / 1e6
+            
+            sargs = dict(title_font_size=12, label_font_size=10, shadow=False, n_labels=5, 
+                         fmt="%.1f", vertical=True, position_x=0.82, position_y=0.1, height=0.75, width=0.1)
+
+            targetAxes.subplot(0, 0)
+            
+            grid_top = grid.copy()
+            grid_top.point_data["Bending Stress (MPa)"] = stress_bending_mpa
+            
+            targetAxes.add_mesh(grid_top, name='val_bending', scalars="Bending Stress (MPa)", 
+                                cmap="jet", show_edges=True, edge_color='black', line_width=0.1, scalar_bar_args=sargs)
+            targetAxes.add_text("3D FEA: Bending Stress XX [MPa]", name='val_bend_txt', font_size=10, color='black')
+            targetAxes.view_isometric(); targetAxes.add_axes(); targetAxes.reset_camera()
+            
+            targetAxes.subplot(1, 0)
+            
+            grid_bot = grid.copy()
+            grid_bot.point_data["Shear Stress XZ (MPa)"] = stress_shear_mpa
+            
+            targetAxes.add_mesh(grid_bot, name='val_shear', scalars="Shear Stress XZ (MPa)", 
+                                cmap="jet", show_edges=True, edge_color='black', line_width=0.1, scalar_bar_args=sargs)
+            targetAxes.add_text("3D FEA: Shear Stress XZ [MPa]", name='val_shear_txt', font_size=10, color='black')
+            targetAxes.view_isometric(); targetAxes.add_axes(); targetAxes.reset_camera()
+            
+            targetAxes.update()
+        except Exception as e:
+            print(f"Validation Plot Error: {e}")
+            traceback.print_exc()
+            try:
+                targetAxes.clear()
+            except Exception:
+                pass
+            return
 
     def update_Validation_Summary(self, u_1d, u_3d, s_1d, s_3d, ss_1d, ss_3d, cpu_time, targetTextArea):
         max_u_3d = np.max(np.abs(u_3d)) * 1000 if len(u_3d) > 0 else np.max(np.abs(self.U_full)) * 1000
@@ -2472,64 +2496,96 @@ class OfflinePreparationStudio(QMainWindow):
             self.unlock_ui() 
         
     def plot_stresses(self, Sigma_Final, stress_type, targetAxes, U_full, scale_factor, custom_clim=None):
-        if len(self.node_coords) != len(Sigma_Final): return
+        if len(self.node_coords) != len(Sigma_Final):
+            print("Plot Stress Warning: Node count mismatch, skipping stress plot.")
+            return
             
         stress_map = {'Sigma_xx': (0, 'Sigma_xx'), 'Sigma_yy': (1, 'Sigma_yy'), 'Sigma_zz': (2, 'Sigma_zz'),
                       'Tau_xy':   (3, 'Tau_xy'),   'Tau_yz':   (4, 'Tau_yz'),   'Tau_zx':   (5, 'Tau_zx'), 'Tau_xz':   (5, 'Tau_zx')}
         col, lbl = stress_map.get(stress_type, (0, 'Sigma_xx'))
         stress_data = Sigma_Final[:, col] / 1e6 
-        s_max=max(stress_data); 
-        # --- NEW: Custom Limit Override ---
+        
         if custom_clim is not None:
             c_limits = custom_clim
         else:
-            s_min=min(stress_data); 
-            s_max = max(stress_data)
-            c_limits = [s_min, s_max]
-        # ----------------------------------
+            s_min = np.min(stress_data)
+            s_max = np.max(stress_data)
+            if np.isclose(s_min, s_max):
+                c_limits = [s_min - 0.1, s_max + 0.1]
+            else:
+                c_limits = [s_min, s_max]
         
-        Max_Disp_mm = np.max(np.abs(U_full)) * 1000.0
-        U_nodes = U_full.reshape(-1, 3)
-        def_coords = self.node_coords + (U_nodes * scale_factor)
-        title_str = f"Stress Component: {lbl}\nMax Deflection: {Max_Disp_mm:.3f} mm (Visual Scale: {scale_factor}x)"
-        
-        if 'Hexa' in self.element_type: n_vis = 8; vtk_type = pv.CellType.HEXAHEDRON
-        else: n_vis = 4; vtk_type = pv.CellType.TETRA
-            
-        cells_dict = {vtk_type: self.element_connectivity[:, :n_vis]}
-        
-        grid_undeformed = pv.UnstructuredGrid(cells_dict, self.node_coords)
-        grid_deformed = pv.UnstructuredGrid(cells_dict, def_coords)
-        grid_deformed.point_data["Stress (MPa)"] = stress_data
-        
-        sargs = dict(title_font_size=12, label_font_size=10, shadow=False, n_labels=5, fmt="%.1f", vertical=True, position_x=0.82, position_y=0.1, height=0.75, width=0.1)
-        
-        # --- THE ZOOM FIX: Save the camera exactly where your mouse left it ---
-        saved_cam = targetAxes.camera_position if hasattr(targetAxes, 'camera_initialized') else None
+        if U_full.size == 0:
+            print("Plot Stress Warning: Empty displacement vector, skipping stress plot.")
+            return
 
-        try: targetAxes.clear_scalar_bars()
-        except:
-            for key in list(targetAxes.scalar_bars.keys()): targetAxes.remove_scalar_bar(key)
+        try:
+            Max_Disp_mm = np.max(np.abs(U_full)) * 1000.0
+            U_nodes = U_full.reshape(-1, 3)
+            def_coords = self.node_coords + (U_nodes * scale_factor)
+            title_str = f"Stress Component: {lbl}\nMax Deflection: {Max_Disp_mm:.3f} mm (Visual Scale: {scale_factor}x)"
 
-        # FIXED: Added reset_camera=False to the wireframe mesh as well!
-        targetAxes.add_mesh(grid_undeformed, name='base_wireframe', style='wireframe', color='gray', opacity=0.4, line_width=1.0, reset_camera=False)
-        targetAxes.add_mesh(grid_deformed, name='active_solid', scalars="Stress (MPa)", cmap="jet", clim=c_limits, show_edges=True, edge_color='black', line_width=0.1, scalar_bar_args=sargs, reset_camera=False)                     
-        targetAxes.add_text(title_str, name='active_text', font_size=10, color='black')
-        
-        if not hasattr(targetAxes, 'axes_widget_added'):
-            targetAxes.add_axes(); targetAxes.axes_widget_added = True
-            
-        if not hasattr(targetAxes, 'camera_initialized'):
-            min_c = np.min(self.node_coords, axis=0); max_c = np.max(self.node_coords, axis=0); span_x = max_c[0] - min_c[0]; buf = span_x * 0.2
-            fixed_bounds = [min_c[0]-buf, max_c[0]+buf, min_c[1]-buf, max_c[1]+buf, min_c[2]-(buf*2), max_c[2]+(buf*2)]
-            targetAxes.view_isometric()
-            targetAxes.reset_camera(bounds=fixed_bounds)
-            targetAxes.camera_initialized = True
-        elif saved_cam is not None:
-            # Force the camera back to your manual zoom
-            targetAxes.camera_position = saved_cam
-            
-        targetAxes.render()
+            if 'Hexa' in self.element_type:
+                n_vis = 8; vtk_type = pv.CellType.HEXAHEDRON
+            else:
+                n_vis = 4; vtk_type = pv.CellType.TETRA
+
+            cells_dict = {vtk_type: self.element_connectivity[:, :n_vis]}
+            grid_undeformed = pv.UnstructuredGrid(cells_dict, self.node_coords)
+            grid_deformed = pv.UnstructuredGrid(cells_dict, def_coords)
+            grid_deformed.point_data["Stress (MPa)"] = stress_data
+
+            sargs = dict(title_font_size=12, label_font_size=10, shadow=False, n_labels=5, fmt="%.1f", vertical=True, position_x=0.82, position_y=0.1, height=0.75, width=0.1)
+
+            try:
+                targetAxes.clear()
+            except Exception:
+                pass
+
+            saved_cam = None
+            try:
+                if hasattr(targetAxes, 'camera_initialized'):
+                    saved_cam = targetAxes.camera_position
+            except Exception:
+                saved_cam = None
+
+            try:
+                targetAxes.clear_scalar_bars()
+            except Exception:
+                try:
+                    for key in list(targetAxes.scalar_bars.keys()):
+                        targetAxes.remove_scalar_bar(key)
+                except Exception:
+                    pass
+
+            targetAxes.add_mesh(grid_undeformed, name='base_wireframe', style='wireframe', color='gray', opacity=0.4, line_width=1.0, reset_camera=False)
+            targetAxes.add_mesh(grid_deformed, name='active_solid', scalars="Stress (MPa)", cmap="jet", clim=c_limits, show_edges=True, edge_color='black', line_width=0.1, scalar_bar_args=sargs, reset_camera=False)
+            targetAxes.add_text(title_str, name='active_text', font_size=10, color='black')
+
+            if not hasattr(targetAxes, 'axes_widget_added'):
+                targetAxes.add_axes(); targetAxes.axes_widget_added = True
+
+            if not hasattr(targetAxes, 'camera_initialized'):
+                min_c = np.min(self.node_coords, axis=0); max_c = np.max(self.node_coords, axis=0); span_x = max_c[0] - min_c[0]; buf = span_x * 0.2
+                fixed_bounds = [min_c[0]-buf, max_c[0]+buf, min_c[1]-buf, max_c[1]+buf, min_c[2]-(buf*2), max_c[2]+(buf*2)]
+                targetAxes.view_isometric()
+                targetAxes.reset_camera(bounds=fixed_bounds)
+                targetAxes.camera_initialized = True
+            elif saved_cam is not None:
+                try:
+                    targetAxes.camera_position = saved_cam
+                except Exception:
+                    pass
+
+            targetAxes.render()
+        except Exception as e:
+            print(f"Plot Stress Error: {e}")
+            traceback.print_exc()
+            try:
+                targetAxes.clear()
+            except Exception:
+                pass
+            return
 
     def plot_FS(self, failure_mode, yield_strength, targetAxes, Sigma_Final, U_full, scale_factor, display_type="FS", custom_clim=None):
         if len(self.node_coords) != len(Sigma_Final): return
@@ -2581,43 +2637,80 @@ class OfflinePreparationStudio(QMainWindow):
         sargs = dict(title_font_size=12, label_font_size=10, shadow=False, n_labels=5, fmt="%.1f", vertical=True, position_x=0.82, position_y=0.1, height=0.75, width=0.1)
         
         # --- THE ZOOM FIX: Save the camera exactly where your mouse left it ---
-        saved_cam = targetAxes.camera_position if hasattr(targetAxes, 'camera_initialized') else None
+        saved_cam = None
+        try:
+            if hasattr(targetAxes, 'camera_initialized'):
+                saved_cam = targetAxes.camera_position
+        except Exception:
+            saved_cam = None
 
-        try: targetAxes.clear_scalar_bars()
-        except:
-            for key in list(targetAxes.scalar_bars.keys()): targetAxes.remove_scalar_bar(key)
+        try:
+            targetAxes.clear()
+        except Exception:
+            pass
 
-        # FIXED: Added reset_camera=False to the wireframe mesh as well!
-        targetAxes.add_mesh(grid_undeformed, name='base_wireframe', style='wireframe', color='gray', opacity=0.4, line_width=1.0, reset_camera=False)
-        targetAxes.add_mesh(grid_deformed, name='active_solid', scalars=plot_name, cmap=cmap_choice, clim=c_limits, show_edges=True, edge_color='black', line_width=0.1, scalar_bar_args=sargs, reset_camera=False)                     
-        targetAxes.add_text(title_str, name='active_text', font_size=10, color='black')
-        
-        if not hasattr(targetAxes, 'axes_widget_added'):
-            targetAxes.add_axes(); targetAxes.axes_widget_added = True
-            
-        if not hasattr(targetAxes, 'camera_initialized'):
-            min_c = np.min(self.node_coords, axis=0); max_c = np.max(self.node_coords, axis=0); span_x = max_c[0] - min_c[0]; buf = span_x * 0.2
-            fixed_bounds = [min_c[0]-buf, max_c[0]+buf, min_c[1]-buf, max_c[1]+buf, min_c[2]-(buf*2), max_c[2]+(buf*2)]
-            targetAxes.view_isometric()
-            targetAxes.reset_camera(bounds=fixed_bounds)
-            targetAxes.camera_initialized = True
-        elif saved_cam is not None:
-            # Force the camera back to your manual zoom
-            targetAxes.camera_position = saved_cam
-            
-        targetAxes.render()
+        try:
+            targetAxes.clear_scalar_bars()
+        except Exception:
+            try:
+                for key in list(targetAxes.scalar_bars.keys()):
+                    targetAxes.remove_scalar_bar(key)
+            except Exception:
+                pass
+
+        try:
+            targetAxes.add_mesh(grid_undeformed, name='base_wireframe', style='wireframe', color='gray', opacity=0.4, line_width=1.0, reset_camera=False)
+            targetAxes.add_mesh(grid_deformed, name='active_solid', scalars=plot_name, cmap=cmap_choice, clim=c_limits, show_edges=True, edge_color='black', line_width=0.1, scalar_bar_args=sargs, reset_camera=False)
+            targetAxes.add_text(title_str, name='active_text', font_size=10, color='black')
+
+            if not hasattr(targetAxes, 'axes_widget_added'):
+                targetAxes.add_axes(); targetAxes.axes_widget_added = True
+
+            if not hasattr(targetAxes, 'camera_initialized'):
+                min_c = np.min(self.node_coords, axis=0); max_c = np.max(self.node_coords, axis=0); span_x = max_c[0] - min_c[0]; buf = span_x * 0.2
+                fixed_bounds = [min_c[0]-buf, max_c[0]+buf, min_c[1]-buf, max_c[1]+buf, min_c[2]-(buf*2), max_c[2]+(buf*2)]
+                targetAxes.view_isometric()
+                targetAxes.reset_camera(bounds=fixed_bounds)
+                targetAxes.camera_initialized = True
+            elif saved_cam is not None:
+                try:
+                    targetAxes.camera_position = saved_cam
+                except Exception:
+                    pass
+
+            targetAxes.render()
+        except Exception as e:
+            print(f"Plot FS Error: {e}")
+            traceback.print_exc()
+            try:
+                targetAxes.clear()
+            except Exception:
+                pass
+            return
 
     def TrainButtonPushed(self):
         self.lock_ui() 
         try:
+            # CRITICAL FIX: Purge old ROM data before retraining to prevent mode conflicts
+            self.Phi = None; self.Phi_stress = None; self.K_rom = None
+            if hasattr(self, 'SnapshotMatrix'): self.SnapshotMatrix = None
+            gc.collect()
+            
+            if not hasattr(self, 'K_reduced') or self.K_reduced is None:
+                raise RuntimeError("ROM training requires a solved FEM model with applied boundary conditions.")
+            if not hasattr(self, 'bc_info') or 'free_dofs_indices' not in self.bc_info:
+                raise RuntimeError("Boundary condition information is missing. Please apply BC before ROM training.")
+
             num_snapshots = int(self.num_snapshotsEditField.text())
             x_positions = np.linspace(0.01 * self.geometry['Lx'], 0.99 * self.geometry['Lx'], num_snapshots)
             
-            free_dofs = self.bc_info['free_dofs_indices']; num_free_dof = len(free_dof)
+            free_dofs = self.bc_info['free_dofs_indices']; num_free_dof = len(free_dofs)
             self.SnapshotMatrix = np.zeros((num_free_dof, num_snapshots))
             
             self.TrainningTimeTextArea.setText("*** Starting ROM Training ***\n"); print("Starting ROM Training...")
             K_reduced_csr = self.K_reduced.tocsr()
+            num_total_dof = self.K_global.shape[0]
+            num_nodes = self.node_coords.shape[0]
             
             # Show progress dialog for snapshot collection
             progress = QProgressDialog("Collecting Snapshots...", "Cancel", 0, num_snapshots, self)
@@ -2706,7 +2799,17 @@ class OfflinePreparationStudio(QMainWindow):
  
     def CheckAccuracyButtonPushed(self):
         self.lock_ui() 
+        progress = None
         try:
+            if not hasattr(self, 'Phi') or self.Phi is None or not hasattr(self, 'K_rom') or self.K_rom is None or not hasattr(self, 'Phi_stress') or self.Phi_stress is None:
+                raise ValueError("ROM data is missing. Train the ROM before running validation.")
+            if not hasattr(self, 'K_reduced') or self.K_reduced is None:
+                raise ValueError("Reduced stiffness matrix (K_reduced) is not available. Apply boundary conditions first.")
+            if not hasattr(self, 'bc_info') or self.bc_info is None or 'free_dofs_indices' not in self.bc_info:
+                raise ValueError("Boundary condition data is missing. Please set boundary conditions and reapply loads.")
+            if not hasattr(self, 'B_global') or self.B_global is None or not hasattr(self, 'D_mat') or self.D_mat is None:
+                raise ValueError("Stress recovery matrices are missing. Ensure your model has been assembled correctly.")
+
             x_pos = (self.ValidationLoadPositionSlider.value() / 100.0) * self.geometry['Lx'] 
             P_val = float(self.ValidationLoadNEditField.text())
             stress_type = self.TypeofStressesDropDown_2.currentText()
@@ -2728,8 +2831,15 @@ class OfflinePreparationStudio(QMainWindow):
                 
             free_dofs = self.bc_info['free_dofs_indices']; F_red = F_temp[free_dofs]
         
+            if sp.issparse(self.K_reduced):
+                K_reduced_csr = self.K_reduced.tocsr()
+            else:
+                K_reduced_csr = sp.csr_matrix(self.K_reduced)
+            if K_reduced_csr.shape[0] != len(F_red):
+                raise ValueError(f"K_reduced dimension {K_reduced_csr.shape} does not match F_red length {len(F_red)}.")
+
             t0 = time.perf_counter()
-            U_free_fem = spla.spsolve(self.K_reduced.tocsr(), F_red)
+            U_free_fem = spla.spsolve(K_reduced_csr, F_red)
             time_fem_solve = time.perf_counter() - t0
             progress.setValue(1)
             
@@ -2791,72 +2901,102 @@ class OfflinePreparationStudio(QMainWindow):
         except Exception as e:
             QMessageBox.critical(None, "Validation Error", f"Error:\n{str(e)}\n\n{traceback.format_exc()}")
         finally:
+            if progress is not None:
+                try:
+                    progress.close()
+                except Exception:
+                    pass
             self.unlock_ui()
+            try:
+                gc.collect()
+            except Exception:
+                pass
 
     def SaveButtonPushed(self):
-        if not hasattr(self, 'Phi') or self.Phi is None or not hasattr(self, 'K_rom') or self.K_rom is None:
-            QMessageBox.critical(None, "Save Error", "No ROM data found! Please train the ROM first.")
-            return
-        
-        default_name = f"Cantilever_ROM_{datetime.now().strftime('%H%M%S')}"
-        instruction_text = (
-            "CRITICAL FOR LIVE TWIN:\n"
-            "The name MUST contain one of these keywords based on your current setup:\n"
-            "- 'Simply' (for Simply Supported)\n"
-            "- 'Cant' (for Cantilever)\n"
-            "- 'Fix' (for Fixed-Fixed)\n\n"
-            "Enter a label for this ROM state:"
-        )
-        rom_label, ok = QInputDialog.getText(None, "Save ROM Data for Digital Twin", instruction_text, text=default_name)
-        if not ok or not rom_label: return
-            
-        # --- UPDATE THIS DICTIONARY ---
-        New_ROM = {
-            'Label': rom_label, 
-            'Phi': self.Phi, 
-            'Phi_stress': self.Phi_stress, 
-            'K_rom': self.K_rom, 
-            'bc_info': self.bc_info, 
-            'NumNodes': self.node_coords.shape[0], 
-            'ElementType': self.element_type,
-            'Nodes': self.node_coords,
-            'Connectivity': self.element_connectivity # <--- CRITICAL NEW ADDITION
-        }
-
-        # --- THE FIX: Disable the scary "Overwrite/Replace" warning ---
-        options = QFileDialog.Option.DontConfirmOverwrite
-        save_filename, _ = QFileDialog.getSaveFileName(
-            self, 
-            "Select ROM Bank to Update (or create new)", 
-            "DigitalTwin_ROM_Bank.pkl", 
-            "Pickle Files (*.pkl);;All Files (*)",
-            options=options
-        )
-        
-        if not save_filename:
-            return # User canceled
-            
-        # Safely Load existing, Append the new ROM, and Save
-        if os.path.exists(save_filename):
-            try:
-                with open(save_filename, 'rb') as f: 
-                    ROM_Bank = pickle.load(f)
-                ROM_Bank.append(New_ROM)
-            except Exception as e:
-                QMessageBox.critical(None, "File Error", f"Could not read existing Bank. Is it corrupted?\n{e}")
+        self.lock_ui()
+        try:
+            if not hasattr(self, 'Phi') or self.Phi is None or not hasattr(self, 'K_rom') or self.K_rom is None:
+                QMessageBox.critical(None, "Save Error", "No ROM data found! Please train the ROM first.")
+                self.unlock_ui()
                 return
-        else: 
-            ROM_Bank = [New_ROM]
             
-        with open(save_filename, 'wb') as f: 
-            pickle.dump(ROM_Bank, f)
+            default_name = f"Cantilever_ROM_{datetime.now().strftime('%H%M%S')}"
+            instruction_text = (
+                "CRITICAL FOR LIVE TWIN:\n"
+                "The name MUST contain one of these keywords based on your current setup:\n"
+                "- 'Simply' (for Simply Supported)\n"
+                "- 'Cant' (for Cantilever)\n"
+                "- 'Fix' (for Fixed-Fixed)\n\n"
+                "Enter a label for this ROM state:"
+            )
+            rom_label, ok = QInputDialog.getText(None, "Save ROM Data for Digital Twin", instruction_text, text=default_name)
+            if not ok or not rom_label: 
+                self.unlock_ui()
+                return
+                
+            # --- UPDATE THIS DICTIONARY ---
+            New_ROM = {
+                'Label': rom_label, 
+                'Phi': self.Phi, 
+                'Phi_stress': self.Phi_stress, 
+                'K_rom': self.K_rom, 
+                'bc_info': self.bc_info, 
+                'NumNodes': self.node_coords.shape[0], 
+                'ElementType': self.element_type,
+                'Nodes': self.node_coords,
+                'Connectivity': self.element_connectivity # <--- CRITICAL NEW ADDITION
+            }
+
+            # --- THE FIX: Disable the scary "Overwrite/Replace" warning ---
+            options = QFileDialog.Option.DontConfirmOverwrite
+            save_filename, _ = QFileDialog.getSaveFileName(
+                self, 
+                "Select ROM Bank to Update (or create new)", 
+                "DigitalTwin_ROM_Bank.pkl", 
+                "Pickle Files (*.pkl);;All Files (*)",
+                options=options
+            )
             
-        if hasattr(self, 'DT_Bank'): self.DT_Bank = ROM_Bank
-        msg = f"ROM '{rom_label}' successfully added to:\n{save_filename}\n\nTotal Models in Bank: {len(ROM_Bank)}"
-        QMessageBox.information(None, "Save Successful", msg)
-        
-        # MEMORY CLEANUP: Force garbage collection after large pickle operations
-        gc.collect()
+            if not save_filename:
+                self.unlock_ui()
+                return # User canceled
+                
+            # Safely Load existing, Append the new ROM, and Save
+            if os.path.exists(save_filename):
+                try:
+                    with open(save_filename, 'rb') as f: 
+                        ROM_Bank = pickle.load(f)
+                    ROM_Bank.append(New_ROM)
+                except Exception as e:
+                    QMessageBox.critical(None, "File Error", f"Could not read existing Bank. Is it corrupted?\n{e}")
+                    self.unlock_ui()
+                    return
+            else: 
+                ROM_Bank = [New_ROM]
+            
+            # Write with error handling
+            try:
+                with open(save_filename, 'wb') as f: 
+                    pickle.dump(ROM_Bank, f)
+            except Exception as e:
+                QMessageBox.critical(None, "Write Error", f"Failed to save ROM bank. Disk full or permission issue?\n{e}")
+                self.unlock_ui()
+                return
+                
+            if hasattr(self, 'DT_Bank'): self.DT_Bank = ROM_Bank
+            msg = f"ROM '{rom_label}' successfully added to:\n{save_filename}\n\nTotal Models in Bank: {len(ROM_Bank)}"
+            QMessageBox.information(None, "Save Successful", msg)
+            
+            # MEMORY CLEANUP: Force garbage collection after large pickle operations
+            ROM_Bank = None
+            New_ROM = None
+            gc.collect()
+            
+        except Exception as e:
+            QMessageBox.critical(None, "Critical Error", f"Unexpected error during save:\n{str(e)}\n\n{traceback.format_exc()}")
+            gc.collect()
+        finally:
+            self.unlock_ui()
 
 
     def ClearBankButtonPushed(self):
