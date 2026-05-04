@@ -3106,215 +3106,166 @@ class LiveDigitalTwinWindow(QMainWindow):
         # =================================================================
         top_container = QWidget()
         top_grid = QGridLayout(top_container)
-        top_grid.setContentsMargins(1, 1, 1, 1)
-        top_grid.setSpacing(5)
+        top_grid.setContentsMargins(5, 5, 5, 5)
+        top_grid.setSpacing(10)
 
-        # --- Column 0: Header (Spans both rows) ---
+        # --- A. Header with Logo (Top Left, Spanning 2 Rows) ---
         self.header = ProfessionalTheme.create_header_widget("Monitor")
-        self.header.setFixedWidth(550)
-        top_grid.addWidget(self.header, 0, 0, 1, 0)
+        self.header.setFixedWidth(240)
+        top_grid.addWidget(self.header, 0, 0, 2, 1)
 
-        # --- ROW 0, COL 2: Live Predictions (Priority Space) ---
+        # --- B. Live Predictions & Safety (MODIFIED: ONE COLUMN, MULTI-ROW) ---
         out_grp = QGroupBox("Live Predictions & Safety Status")
         ProfessionalTheme.apply_professional_panel_style(out_grp)
-        out_lay = QHBoxLayout(out_grp)
-        out_lay.setContentsMargins(20, 12, 20, 12)
+        # Vertical layout to stack P1, P2, P3, and FS in one column
+        out_lay = QVBoxLayout(out_grp) 
+        out_lay.setContentsMargins(10, 5, 10, 5)
         out_lay.setSpacing(5)
         
-        self.predict_s1 = QLabel("P1: --")
-        self.predict_s2 = QLabel("P2: --")
-        self.predict_s3 = QLabel("P3: --")
+        self.predict_s1 = QLabel("P1: --"); self.predict_s2 = QLabel("P2: --"); self.predict_s3 = QLabel("P3: --")
         self.lbl_fs_status = QLabel("FS STATUS: WAITING")
         
-        style_val = f"font-weight: bold; color: {ProfessionalTheme.SUCCESS_GREEN}; background: {ProfessionalTheme.CONSOLE_BG}; padding: 10px; border-radius: 6px; min-width: 180px; font-size: 11pt; border: 1px solid #34495e;"
+        style_val = f"font-weight: bold; color: {ProfessionalTheme.SUCCESS_GREEN}; background: {ProfessionalTheme.CONSOLE_BG}; padding: 4px; border-radius: 4px; font-size: 10pt; border: 1px solid #34495e;"
         for lbl in [self.predict_s1, self.predict_s2, self.predict_s3]:
-            lbl.setStyleSheet(style_val)
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            out_lay.addWidget(lbl)
+            lbl.setStyleSheet(style_val); lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            out_lay.addWidget(lbl) # Adds each P label to a new row
         
-        self.lbl_fs_status.setStyleSheet(f"font-weight: bold; color: white; background: {ProfessionalTheme.PRIMARY_BLUE}; padding: 10px; border-radius: 6px; min-width: 180px; font-size: 11pt; border: 2px solid {ProfessionalTheme.ACCENT_BLUE};")
+        self.lbl_fs_status.setStyleSheet("font-weight: bold; color: white; background: #2b5797; padding: 4px; border-radius: 4px; text-align: center;")
         self.lbl_fs_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         out_lay.addWidget(self.lbl_fs_status)
-        top_grid.addWidget(out_grp, 0, 2)
         
-        # --- ROW 1, COL 1: Visualization Controls (Compact) ---
-        view_grp = QGroupBox("Visualization")
+        # Add Prediction box to Column 1 (Left of Visualization)
+        top_grid.addWidget(out_grp, 0, 1, 2, 1)
+
+        # --- C. Visualization Controls (Row 0, Col 2) ---
+        view_grp = QGroupBox("Visualization Controls")
         ProfessionalTheme.apply_professional_panel_style(view_grp)
         view_lay = QHBoxLayout(view_grp)
-        view_lay.setContentsMargins(12, 8, 12, 8)
-        view_lay.setSpacing(5)
+        view_lay.setContentsMargins(10, 5, 10, 5)
+        view_lay.setSpacing(8)
 
         self.PrimaryModeCombo = QComboBox(); self.PrimaryModeCombo.addItems(["Failure", "Stress"])
-        self.PrimaryModeCombo.setFixedWidth(90)
-        self.PrimaryModeCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
+        self.PrimaryModeCombo.setFixedWidth(80)
         
         self.options_stack = QStackedWidget()
-        # Failure Settings
         fail_container = QWidget(); fail_lay = QHBoxLayout(fail_container); fail_lay.setContentsMargins(0,0,0,0)
         self.FailDisplayCombo = QComboBox(); self.FailDisplayCombo.addItems(["FS", "Intensity"])
-        self.FailDisplayCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
         self.FailMethodCombo = QComboBox(); self.FailMethodCombo.addItems(["Von Mises", "Max Principal", "Max Shear"])
-        self.FailMethodCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
         fail_lay.addWidget(self.FailDisplayCombo); fail_lay.addWidget(self.FailMethodCombo)
         self.options_stack.addWidget(fail_container)
-        # Stress Settings
+
         stress_container = QWidget(); stress_lay = QHBoxLayout(stress_container); stress_lay.setContentsMargins(0,0,0,0)
         self.StressTypeCombo = QComboBox(); self.StressTypeCombo.addItems(["Sigma_xx", "Sigma_yy", "Sigma_zz", "Tau_xy", "Tau_yz", "Tau_zx"])
-        self.StressTypeCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
         stress_lay.addWidget(self.StressTypeCombo); self.options_stack.addWidget(stress_container)
-
         self.PrimaryModeCombo.currentIndexChanged.connect(self.options_stack.setCurrentIndex)
+
+        view_lay.addWidget(QLabel("Mode:")); view_lay.addWidget(self.PrimaryModeCombo)
+        view_lay.addWidget(self.options_stack)
+        view_lay.addWidget(QLabel("Scale:")); self.ScaleFactorEditField_2 = QLineEdit("500"); self.ScaleFactorEditField_2.setFixedWidth(40)
+        view_lay.addWidget(self.ScaleFactorEditField_2)
+
+        self.AutoColorLimitSwitch = QCheckBox("Auto"); self.AutoColorLimitSwitch.setChecked(True)
+        self.CMinEdit = QLineEdit("-250"); self.CMinEdit.setFixedWidth(40); self.CMinEdit.setEnabled(False)
+        self.CMaxEdit = QLineEdit("250"); self.CMaxEdit.setFixedWidth(40); self.CMaxEdit.setEnabled(False)
+        self.btn_apply_color = QPushButton("✓"); self.btn_apply_color.setFixedWidth(25); self.btn_apply_color.setEnabled(False)
         
-        view_lay.addWidget(self.PrimaryModeCombo); view_lay.addWidget(self.options_stack)
-        self.btn_reset_cam = QPushButton("🎥 Reset View")
-        self.btn_reset_cam.setFixedWidth(100)
-        self.btn_reset_cam.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.TEXT_GRAY, width=95))
+        view_lay.addWidget(self.AutoColorLimitSwitch)
+        view_lay.addWidget(QLabel("Min:")); view_lay.addWidget(self.CMinEdit)
+        view_lay.addWidget(QLabel("Max:")); view_lay.addWidget(self.CMaxEdit); view_lay.addWidget(self.btn_apply_color)
+        
+        self.btn_reset_cam = QPushButton("🎥"); self.btn_reset_cam.setFixedWidth(35)
         view_lay.addWidget(self.btn_reset_cam)
         
-        top_grid.addWidget(view_grp, 1, 1)
+        top_grid.addWidget(view_grp, 0, 2)
 
-        # --- ROW 1: Hardware Interface (SPACED & PROFESSIONAL) ---
+        # --- D. Hardware Interface (Row 1, Col 2) ---
         in_grp = QGroupBox("Cyber-Physical Hardware Interface")
         ProfessionalTheme.apply_professional_panel_style(in_grp)
         in_lay = QHBoxLayout(in_grp)
-        in_lay.setContentsMargins(20, 12, 20, 12)
-        in_lay.setSpacing(12)
+        in_lay.setContentsMargins(15, 5, 15, 5)
         
-        # Zone 1: Buttons
         self.btn_connect_hw = QPushButton("🔌 Connect")
-        self.btn_connect_hw.setFixedWidth(110)
-        self.btn_connect_hw.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=110))
+        self.btn_go_live = QPushButton("▶ LIVE"); self.btn_go_live.setCheckable(True)
+        in_lay.addWidget(self.btn_connect_hw); in_lay.addWidget(self.btn_go_live)
+        in_lay.addSpacing(25)
         
-        self.btn_go_live = QPushButton("▶ LIVE")
-        self.btn_go_live.setFixedWidth(95)
-        self.btn_go_live.setCheckable(True)
-        self.btn_go_live.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.SUCCESS_GREEN, width=95))
-        
-        in_lay.addWidget(self.btn_connect_hw)
-        in_lay.addWidget(self.btn_go_live)
-        
-        # Separator line
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.VLine)
-        separator.setStyleSheet(f"color: {ProfessionalTheme.BORDER_LIGHT};")
-        in_lay.addWidget(separator)
-
-        
-
-        # Helper to create professional readout clusters
         def add_readout(label_text, widget):
-            container = QVBoxLayout()
-            lbl = QLabel(f"{label_text}")
-            lbl.setStyleSheet(f"font-size: 8pt; color: {ProfessionalTheme.TEXT_GRAY}; font-weight: 500; text-align: center;")
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            widget.setFixedWidth(80)
-            widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            widget.setStyleSheet(f"background: {ProfessionalTheme.CONSOLE_BG}; color: #00ff00; font-weight: bold; font-size: 11pt; border: 1px solid {ProfessionalTheme.BORDER_COLOR}; border-radius: 4px; padding: 5px; font-family: 'Courier New';")
-            container.addWidget(lbl)
-            container.addWidget(widget)
-            in_lay.addLayout(container)
+            container = QVBoxLayout(); container.setSpacing(1)
+            lbl = QLabel(f"<b>{label_text}</b>"); lbl.setStyleSheet("font-size: 8pt; color: #bdc3c7;"); lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            widget.setFixedWidth(65); widget.setAlignment(Qt.AlignmentFlag.AlignCenter); widget.setReadOnly(True)
+            widget.setStyleSheet(f"background: {ProfessionalTheme.CONSOLE_BG}; color: #f1c40f; font-weight: bold; border: 1px solid #34495e; border-radius: 3px;")
+            container.addWidget(lbl); container.addWidget(widget)
+            in_lay.addLayout(container); in_lay.addSpacing(15)
 
-        self.in_Load = QLineEdit("0.0")
-        self.in_S1 = QLineEdit("0")
-        self.in_S2 = QLineEdit("0")
-        self.in_S3 = QLineEdit("0")
-        self.in_Lposition = QLineEdit("0.0")
-
-        for w in [self.in_Load, self.in_S1, self.in_S2, self.in_S3, self.in_Lposition]:
-            w.setReadOnly(True)
-
-        # Adding readouts with structured spacing
-        add_readout("LOAD\n(N)", self.in_Load)
-        add_readout("SG-1\n(uE)", self.in_S1)
-        add_readout("SG-2\n(uE)", self.in_S2)
-        add_readout("SG-3\n(uE)", self.in_S3)
-        add_readout("POS\n(mm)", self.in_Lposition)
-
-        # Sensor probe location controls
-        probe_layout = QHBoxLayout()
-        probe_layout.setContentsMargins(0, 0, 0, 0)
-        probe_layout.setSpacing(10)
-
-        beam_len = self.geometry.get('Lx', 1.0)
-        self.pre_s1_loc = QLineEdit(f"{beam_len * 0.25:.2f}")
-        self.pre_s2_loc = QLineEdit(f"{beam_len * 0.50:.2f}")
-        self.pre_s3_loc = QLineEdit(f"{beam_len * 0.75:.2f}")
-
-        for widget in [self.pre_s1_loc, self.pre_s2_loc, self.pre_s3_loc]:
-            widget.setFixedWidth(70)
-            widget.setStyleSheet("border: 1px solid #bdc3c7; border-radius: 4px; padding: 4px;")
-
-        probe_layout.addWidget(QLabel("Probe X Locations (m):"))
-        probe_layout.addWidget(QLabel("SG1:"))
-        probe_layout.addWidget(self.pre_s1_loc)
-        probe_layout.addWidget(QLabel("SG2:"))
-        probe_layout.addWidget(self.pre_s2_loc)
-        probe_layout.addWidget(QLabel("SG3:"))
-        probe_layout.addWidget(self.pre_s3_loc)
-
-        in_lay.addLayout(probe_layout)
-        in_lay.addStretch()
+        self.in_Load = QLineEdit("0.0"); self.in_S1 = QLineEdit("0"); self.in_S2 = QLineEdit("0")
+        self.in_S3 = QLineEdit("0"); self.load_pos_m = QLineEdit("0.0")
         
-        top_grid.addWidget(in_grp, 1, 2, 1, 1)  # Move to Row 1, Col 2 (top right)
+        add_readout("LOAD (N)", self.in_Load); add_readout("SG-1 (uE)", self.in_S1)
+        add_readout("SG-2 (uE)", self.in_S2); add_readout("SG-3 (uE)", self.in_S3); add_readout("POS (mm)", self.load_pos_m)
+        
+        in_lay.addSpacing(10); in_lay.addWidget(QLabel("<b>Probe X:</b>"))
+        self.pre_s1_loc = QLineEdit("0.12"); self.pre_s2_loc = QLineEdit("0.25"); self.pre_s3_loc = QLineEdit("0.37")
+        for le in [self.pre_s1_loc, self.pre_s2_loc, self.pre_s3_loc]:
+            le.setFixedWidth(45); le.setStyleSheet("border: 1px solid gray; border-radius: 2px;"); in_lay.addWidget(le)
 
-        # Set Column Stretching - balance space for more graphics area
-        top_grid.setColumnStretch(1, 3) # More space for future graphics expansion
-        top_grid.setColumnStretch(2, 2) # Hardware + Visualization compact area
+        in_lay.addStretch()
+        top_grid.addWidget(in_grp, 1, 2)
 
+        # Set Column Stretching
+        top_grid.setColumnStretch(1, 1) # Prediction column (Narrower stack)
+        top_grid.setColumnStretch(2, 4) # Controls column (Wider)
         self.main_layout.addWidget(top_container)
 
         # =================================================================
         # 2. MAIN CONTENT AREA (Graphics + Plots)
         # =================================================================
-        content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.graphics_tabs = QTabWidget()
-
+        
         # Tab A: 3D View
         self.tab_3d = QWidget(); layout_3d = QVBoxLayout(self.tab_3d)
         self.UIAxes_3D = QtInteractor(); layout_3d.addWidget(self.UIAxes_3D)
         self.graphics_tabs.addTab(self.tab_3d, "3D Isometric View")
-
-        # Tab B: 2D View (3 SUBPLOT STYLE)
+        
+        # Tab B: 2D Orthographic (Restored 3-Subplot Arrangement)
         self.tab_2d = QWidget(); layout_2d = QVBoxLayout(self.tab_2d)
-        sec_ctrl_lay = QHBoxLayout()
+        sec_ctrl = QHBoxLayout()
         self.TopSliceCombo = QComboBox(); self.TopSliceCombo.addItems(["Top", "Axis", "Bottom"])
         self.ViewSectionSlider = QSlider(Qt.Orientation.Horizontal); self.ViewSectionSlider.setRange(0, 100); self.ViewSectionSlider.setValue(50)
         self.lbl_sec = QLabel(f"Section Cut (X): {self.geometry.get('Lx',1.0)/2:.2f} m")
-        sec_ctrl_lay.addWidget(QLabel("Slice:")); sec_ctrl_lay.addWidget(self.TopSliceCombo)
-        sec_ctrl_lay.addSpacing(20); sec_ctrl_lay.addWidget(self.lbl_sec); sec_ctrl_lay.addWidget(self.ViewSectionSlider)
-        layout_2d.addLayout(sec_ctrl_lay)
+        sec_ctrl.addWidget(QLabel("Slice:")); sec_ctrl.addWidget(self.TopSliceCombo); sec_ctrl.addSpacing(20); sec_ctrl.addWidget(self.lbl_sec); sec_ctrl.addWidget(self.ViewSectionSlider)
+        layout_2d.addLayout(sec_ctrl)
 
-        def wrap_canvas(interactor):
-            frame = QFrame(); frame.setStyleSheet("QFrame { border: 2px solid #7f8c8d; border-radius: 4px; background: white; }")
-            lay = QVBoxLayout(frame); lay.setContentsMargins(2,2,2,2); lay.addWidget(interactor); return frame
+        def wrap(interactor):
+            f = QFrame(); f.setStyleSheet("QFrame { border: 2px solid #7f8c8d; border-radius: 4px; background: white; }")
+            l = QVBoxLayout(f); l.setContentsMargins(2,2,2,2); l.addWidget(interactor); return f
 
         self.UIAxes_2D_Front = QtInteractor(); self.UIAxes_2D_Top = QtInteractor(); self.UIAxes_2D_Sec = QtInteractor()
-        grid_2d = QGridLayout(); grid_2d.setSpacing(10)
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Front), 0, 0, 2, 3) 
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Top), 2, 0, 1, 2)
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Sec), 2, 2, 1, 1)
-        layout_2d.addLayout(grid_2d)
+        g2d = QGridLayout(); g2d.setSpacing(10)
+        g2d.addWidget(wrap(self.UIAxes_2D_Front), 0, 0, 2, 3) 
+        g2d.addWidget(wrap(self.UIAxes_2D_Top), 2, 0, 1, 2)
+        g2d.addWidget(wrap(self.UIAxes_2D_Sec), 2, 2, 1, 1)
+        layout_2d.addLayout(g2d)
         self.graphics_tabs.addTab(self.tab_2d, "2D Orthographic Views")
+        main_splitter.addWidget(self.graphics_tabs)
 
-        content_splitter.addWidget(self.graphics_tabs)
-
-        # Right Side Plots
-        plots_grp = QGroupBox("Analysis Plots")
-        ProfessionalTheme.apply_professional_panel_style(plots_grp)
-        plots_lay = QVBoxLayout(plots_grp)
+        plots_panel = QWidget(); plots_lay = QVBoxLayout(plots_panel)
         self.line_figure = Figure(figsize=(4, 6), tight_layout=True); self.line_canvas = FigureCanvas(self.line_figure)
-        plots_lay.addWidget(self.line_canvas); content_splitter.addWidget(plots_grp)
+        plots_lay.addWidget(self.line_canvas); main_splitter.addWidget(plots_panel)
         
-        # Increase graphics area: ratio 75% graphics, 25% plots
-        content_splitter.setSizes([1350, 450])
-        self.main_layout.addWidget(content_splitter, 1)
+        main_splitter.setSizes([1100, 400])
+        self.main_layout.addWidget(main_splitter, 1)
 
-        # --- SIGNAL CONNECTIONS ---
+        # --- Re-attach Signals ---
         self.btn_connect_hw.clicked.connect(self.attempt_connect)
         self.btn_go_live.toggled.connect(self.toggle_live_feed)
         self.ViewSectionSlider.valueChanged.connect(self.on_section_change)
+        self.AutoColorLimitSwitch.stateChanged.connect(self.toggle_color_limits)
+        self.btn_apply_color.clicked.connect(self.update_visuals_only)
+        self.btn_reset_cam.clicked.connect(self.reset_camera_view)
         for w in [self.PrimaryModeCombo, self.FailDisplayCombo, self.FailMethodCombo, self.StressTypeCombo]:
             w.currentTextChanged.connect(self.update_visuals_only)
+
     # =================================================================
     # UI LOGIC & HARDWARE THREADING
     # =================================================================
@@ -3380,7 +3331,7 @@ class LiveDigitalTwinWindow(QMainWindow):
             self.in_S1.setText(f"{strains[0]:.1f}")
             self.in_S2.setText(f"{strains[1]:.1f}")
             self.in_S3.setText(f"{strains[2]:.1f}")
-            self.in_Lposition.setText(f"{p_mm:.1f}")
+            self.load_pos_m.setText(f"{p_mm:.1f}")
 
             # 2. Logic & ROM Selection
             strains_array = np.array(strains)
@@ -3449,9 +3400,9 @@ class LiveDigitalTwinWindow(QMainWindow):
             e2 = abs(p2 - strains[1]) / max(abs(strains[1]), 1e-5) * 100
             e3 = abs(p3 - strains[2]) / max(abs(strains[2]), 1e-5) * 100
             
-            self.predict_s1.setText(f"SG1 @ {x_loc_1:.2f} m: {p1:.1f} uE (Err: {e1:.1f}%)")
-            self.predict_s2.setText(f"SG2 @ {x_loc_2:.2f} m: {p2:.1f} uE (Err: {e2:.1f}%)")
-            self.predict_s3.setText(f"SG3 @ {x_loc_3:.2f} m: {p3:.1f} uE (Err: {e3:.1f}%)")
+            self.predict_s1.setText(f"{x_loc_1:.2f} m: {p1:.1f} uE (Err: {e1:.1f}%)")
+            self.predict_s2.setText(f"{x_loc_2:.2f} m: {p2:.1f} uE (Err: {e2:.1f}%)")
+            self.predict_s3.setText(f"{x_loc_3:.2f} m: {p3:.1f} uE (Err: {e3:.1f}%)")
             
             try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
             except: yield_strength = 250.0
@@ -3598,7 +3549,7 @@ class LiveDigitalTwinWindow(QMainWindow):
         if cam_front is not None: self.UIAxes_2D_Front.camera_position = cam_front
 
         # 3. Section View (Static Undeformed)
-        cut_x = (self.SectionSlider.value() / 100.0) * self.geometry['Lx']
+        cut_x = (self.ViewSectionSlider.value() / 100.0) * self.geometry['Lx']
         unique_x = np.unique(np.round(nodes[:, 0], decimals=4))
         closest_x = unique_x[np.argmin(np.abs(unique_x - cut_x))]
         idx_sec = np.where(np.abs(nodes[:, 0] - closest_x) < 1e-4)[0]
