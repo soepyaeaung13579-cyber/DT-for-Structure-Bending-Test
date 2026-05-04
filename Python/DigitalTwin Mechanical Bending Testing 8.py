@@ -252,745 +252,8 @@ class SensorManager:
                 time.sleep(0.01)
         return np.mean(collected, axis=0) if collected else None
 
-
-
 # =========================================================================
-# 2. CALIBRATION BAY (MODULE 2)
-# =========================================================================
-class CalibrationWindow(QMainWindow):
-    def __init__(self, sensor_manager, parent_geometry):
-        super().__init__()
-        self.setWindowTitle("Module 2: Hardware Calibration Bay")
-        self.setGeometry(200, 200, 1000, 600)
-        self.sm = sensor_manager
-        self.beam_geometry = parent_geometry
-        
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
-        self.layout = QHBoxLayout(self.central_widget)
-        
-        self.build_ui()
-        self.live_timer = QTimer()
-        self.live_timer.timeout.connect(self.update_live_dashboard)
-        
-    def build_ui(self):
-        left = QVBoxLayout(); mid = QVBoxLayout(); right = QVBoxLayout()
-
-        c_grp = QGroupBox("Hardware Controls"); c_lay = QFormLayout()
-        ProfessionalTheme.apply_professional_panel_style(c_grp)
-        self.btn_conn = QPushButton("🔌 Connect Arduino")
-        self.btn_conn.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=140))
-        self.btn_conn.clicked.connect(self.handle_connect)
-        self.lbl_status = QLabel("⚪ Disconnected")
-        self.lbl_status.setStyleSheet(f"color: {ProfessionalTheme.TEXT_GRAY}; font-weight: 500;")
-        
-        self.btn_load_tare = QPushButton("📊 Tare Load Cell")
-        self.btn_load_tare.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.INFO_PURPLE, width=140))
-        self.btn_load_tare.clicked.connect(self.tare_load)
-        self.m_input = QLineEdit("1.0")
-        self.m_input.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 6px; font-size: 10pt;")
-        self.btn_load_cal = QPushButton("⚙️ Set Load Factor")
-        self.btn_load_cal.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=140))
-        self.btn_load_cal.clicked.connect(self.calibrate_load)
-        
-        self.btn_strain_tare = QPushButton("📈 Tare Strain")
-        self.btn_strain_tare.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.INFO_PURPLE, width=140))
-        self.btn_strain_tare.clicked.connect(self.tare_strain)
-        self.d_input = QLineEdit("1.0")
-        self.d_input.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 6px; font-size: 10pt;")
-        self.btn_strain_cal = QPushButton("⚙️ Set AMP_GAIN")
-        self.btn_strain_cal.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=140))
-        self.btn_strain_cal.clicked.connect(self.calibrate_gain)
-
-        c_lay.addRow(self.btn_conn, self.lbl_status); c_lay.addRow(self.btn_load_tare)
-        c_lay.addRow("Standard Mass (kg):", self.m_input); c_lay.addRow(self.btn_load_cal)
-        c_lay.addRow(self.btn_strain_tare); c_lay.addRow("Dial Gauge (mm):", self.d_input)
-        c_lay.addRow(self.btn_strain_cal); c_grp.setLayout(c_lay); left.addWidget(c_grp)
-
-        v_grp = QGroupBox("Validation Mode"); v_lay = QFormLayout()
-        ProfessionalTheme.apply_professional_panel_style(v_grp)
-        self.mode = QComboBox(); self.mode.addItems(["Fixed-Fixed", "Simply Supported", "Cantilever"])
-        self.pos_x = QLineEdit("250.0")
-        v_lay.addRow("Beam Boundary:", self.mode); v_lay.addRow("Gauge X (mm):", self.pos_x)
-        v_grp.setLayout(v_lay); left.addWidget(v_grp); left.addStretch()
-
-        self.log_a = QTextEdit(); self.log_a.setReadOnly(True)
-        self.log_a.setStyleSheet(f"background: {ProfessionalTheme.CONSOLE_BG}; color: {ProfessionalTheme.CONSOLE_TEXT}; font-family: Courier; border: 1px solid {ProfessionalTheme.BORDER_COLOR}; border-radius: 4px;")
-        mid.addWidget(QLabel("<b style='color: {ProfessionalTheme.PRIMARY_BLUE};'>Process Log:</b>")); mid.addWidget(self.log_a)
-        
-        f_grp = QGroupBox("Derived Factors"); f_lay = QFormLayout()
-        ProfessionalTheme.apply_professional_panel_style(f_grp)
-        self.l_fac = QLabel("1.0"); self.a_fac = QLabel("100.0")
-        f_lay.addRow("Load Factor (bits/kg):", self.l_fac); f_lay.addRow("AMP_GAIN:", self.a_fac)
-        f_grp.setLayout(f_lay); mid.addWidget(f_grp)
-
-        d_grp = QGroupBox("Live Readouts"); d_lay = QGridLayout()
-        ProfessionalTheme.apply_professional_panel_style(d_grp)
-        self.l_load = QLabel("0.00 N"); self.l_s1 = QLabel("0.0 uE"); self.l_s2 = QLabel("0.0 uE")
-        self.l_s3 = QLabel("0.0 uE"); self.l_virt = QLabel("0.00 mm"); self.l_pos = QLabel("0.00 mm")
-        
-        style = f"font-size: 14pt; font-weight: bold; color: {ProfessionalTheme.SUCCESS_GREEN}; background: {ProfessionalTheme.CONSOLE_BG}; padding: 8px; border-radius: 4px; border: 1px solid {ProfessionalTheme.PRIMARY_BLUE};"
-        for lbl in [self.l_load, self.l_s1, self.l_s2, self.l_s3, self.l_virt, self.l_pos]: lbl.setStyleSheet(style)
-        
-        d_lay.addWidget(QLabel("Force:"), 0, 0); d_lay.addWidget(self.l_load, 0, 1)
-        d_lay.addWidget(QLabel("Strain Support Left:"), 1, 0); d_lay.addWidget(self.l_s1, 1, 1)
-        d_lay.addWidget(QLabel("Strain Mid:"), 2, 0); d_lay.addWidget(self.l_s2, 2, 1)
-        d_lay.addWidget(QLabel("Strain Support Right:"), 3, 0); d_lay.addWidget(self.l_s3, 3, 1)
-        d_lay.addWidget(QLabel("VIRTUAL DIAL:"), 4, 0); d_lay.addWidget(self.l_virt, 4, 1)
-        d_lay.addWidget(QLabel("Position:"), 5, 0); d_lay.addWidget(self.l_pos, 5, 1)
-        d_grp.setLayout(d_lay); right.addWidget(d_grp)
-
-        self.t_def = QTableWidget(5, 4); self.t_def.setHorizontalHeaderLabels(["Pt", "Physical (mm)", "Virtual (mm)", "Error %"])
-        self.t_lod = QTableWidget(5, 5); self.t_lod.setHorizontalHeaderLabels(["Pt", "Mass (kg)", "Ref (N)", "Live (N)", "Error %"])
-        self.t_pos = QTableWidget(5, 4); self.t_pos.setHorizontalHeaderLabels(["Pt", "Manual (mm)", "Ultra (mm)", "Error %"])
-
-        for t in [self.t_def, self.t_lod, self.t_pos]:
-            for i in range(5): 
-                t.setItem(i, 0, QTableWidgetItem(f"Pt {i+1}"))
-                for col in range(1, t.columnCount()): t.setItem(i, col, QTableWidgetItem("0.0"))
-
-        self.t_def.itemChanged.connect(self.auto_fill_def)
-        self.t_lod.itemChanged.connect(self.auto_fill_lod)
-        self.t_pos.itemChanged.connect(self.auto_fill_pos)
-
-        r_def = QPushButton("Refresh Deflection Table"); r_def.clicked.connect(lambda: self.clear_table(self.t_def))
-        r_lod = QPushButton("Refresh Load Table"); r_lod.clicked.connect(lambda: self.clear_table(self.t_lod))
-        r_pos = QPushButton("Refresh Position Table"); r_pos.clicked.connect(lambda: self.clear_table(self.t_pos))
-
-        right.addWidget(QLabel("<b>Deflection Validation</b>")); right.addWidget(self.t_def); right.addWidget(r_def)
-        right.addWidget(QLabel("<b>Load Validation</b>")); right.addWidget(self.t_lod); right.addWidget(r_lod)
-        right.addWidget(QLabel("<b>Position Validation</b>")); right.addWidget(self.t_pos); right.addWidget(r_pos)
-
-        self.layout.addLayout(left, 1); self.layout.addLayout(mid, 2); self.layout.addLayout(right, 3)
-        
-    def showEvent(self, event):
-        self.live_timer.start(100); super().showEvent(event)
-        
-    def closeEvent(self, event):
-        self.live_timer.stop(); event.accept()
-
-    def handle_connect(self):
-        if self.sm.connect(): self.lbl_status.setText("Connected"); self.log("Serial Ready.")
-
-    def tare_load(self):
-        raw = self.sm.get_average_raw(20); self.sm.load_tare = raw[0]; self.log("Load Tared.")
-
-    def calibrate_load(self):
-        raw = self.sm.get_average_raw(20); self.sm.load_calib_factor = (raw[0] - self.sm.load_tare) / float(self.m_input.text())
-        self.l_fac.setText(f"{self.sm.load_calib_factor:.4f}"); self.log("Load Factor Set.")
-
-    def tare_strain(self):
-        raw = self.sm.get_average_raw(30); self.sm.strain_zero_bits = raw[2]; self.log("Strain Tared.")
-
-    def calibrate_gain(self):
-        raw = self.sm.get_average_raw(30); dial_m = float(self.d_input.text()) / 1000.0
-        BEAM_H, BEAM_L = self.beam_geometry['Lz'], self.beam_geometry['Lx']
-        eps = (12.0 * BEAM_H * dial_m) / (BEAM_L**2)
-        dV = ((raw[2] - self.sm.strain_zero_bits) * 5.0) / 1023.0
-        self.sm.amp_gain = (4.0 * dV) / (eps * self.sm.GF * self.sm.V_IN)
-        self.a_fac.setText(f"{self.sm.amp_gain:.2f}"); self.log("Gain Set.")
-
-    def update_live_dashboard(self):
-        raw = self.sm.get_average_raw(1)
-        if raw is not None:
-            force_n = ((raw[0] - self.sm.load_tare) / self.sm.load_calib_factor) * self.sm.GRAVITY
-            strains = [((raw[i] - self.sm.strain_zero_bits)*5.0/1023.0)*4e6/(self.sm.GF*self.sm.V_IN*self.sm.amp_gain) for i in range(1,4)]
-            mode = self.mode.currentIndex(); L, H = self.beam_geometry['Lx'], self.beam_geometry['Lz']
-            e = strains[1]/1e6
-            if mode == 0: v = (e*L**2)/(12*H)
-            elif mode == 1: v = (e*L**2)/(6*H)
-            else: v = (e*(float(self.pos_x.text())/1000.0)**2)/(3*H)
-            p_mm = (raw[4] *0.343)/2
-            self.l_load.setText(f"{force_n:.2f} N") 
-            self.l_s2.setText(f"{strains[1]:.1f} uE");self.l_s1.setText(f"{strains[0]:.1f} uE");self.l_s3.setText(f"{strains[2]:.1f} uE")
-            self.l_virt.setText(f"{v*1000:.3f} mm"); self.l_pos.setText(f"{p_mm:.2f} mm")
-
-    def auto_fill_def(self, item):
-        if item.column() == 1:
-            row, val = item.row(), float(self.l_virt.text().replace(" mm",""))
-            self.t_def.blockSignals(True); self.t_def.setItem(row, 2, QTableWidgetItem(f"{val:.3f}"))
-            m = float(item.text())
-            if m != 0: self.t_def.setItem(row, 3, QTableWidgetItem(f"{abs((val-m)/m)*100:.2f}%"))
-            self.t_def.blockSignals(False)
-
-    def auto_fill_lod(self, item):
-        if item.column() == 1:
-            row = item.row(); mass_kg = float(item.text()); ref_n = mass_kg * self.sm.GRAVITY
-            live_n = float(self.l_load.text().replace(" N",""))
-            self.t_lod.blockSignals(True); self.t_lod.setItem(row, 2, QTableWidgetItem(f"{ref_n:.2f}")); self.t_lod.setItem(row, 3, QTableWidgetItem(f"{live_n:.2f}"))
-            if ref_n != 0: self.t_lod.setItem(row, 4, QTableWidgetItem(f"{abs((live_n-ref_n)/ref_n)*100:.2f}%"))
-            self.t_lod.blockSignals(False)
-
-    def auto_fill_pos(self, item):
-        if item.column() == 1:
-            row, val = item.row(), float(self.l_pos.text().replace(" mm",""))
-            self.t_pos.blockSignals(True); self.t_pos.setItem(row, 2, QTableWidgetItem(f"{val:.2f}"))
-            m = float(item.text())
-            if m != 0: self.t_pos.setItem(row, 3, QTableWidgetItem(f"{abs((val-m)/m)*100:.2f}%"))
-            self.t_pos.blockSignals(False)
-
-    def clear_table(self, t):
-        t.blockSignals(True)
-        for i in range(5):
-            for j in range(1, t.columnCount()): t.setItem(i, j, QTableWidgetItem("0.0"))
-        t.blockSignals(False)
-
-    def log(self, msg): self.log_a.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
-
-
-# =========================================================================
-# MODULE 3: LIVE DIGITAL TWIN WINDOW (REAL-TIME SENSOR FUSION)
-# =========================================================================
-class LiveDigitalTwinWindow(QMainWindow):
-    """Visualizes real-time sensor data mapped onto the ROM model with Ansys-style layouts."""
-    def __init__(self, sensor_manager, dt_bank, geometry, launcher):
-        super().__init__()
-        self.setWindowTitle("Module 3: Online Digital Twin Monitor")
-        self.setGeometry(100, 100, 1450, 950) # Made slightly wider to fit the top bar
-        
-        self.sm = sensor_manager
-        self.DT_Bank = dt_bank
-        self.geometry = geometry
-        self.launcher = launcher 
-        
-        self._is_rendering = False 
-        self.current_U = None
-        self.current_Sigma = None
-        self.Active_ROM = None
-
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
-        self.main_layout = QVBoxLayout(self.central_widget)
-
-        self.build_ui()
-        
-        # --- BACKGROUND THREAD SETUP ---
-        self.hw_worker = HardwareWorker(self.sm)
-        self.hw_worker.data_ready.connect(self.process_live_data)
-        self.hw_worker.error_occurred.connect(self.handle_thread_error)
-        
-    def build_ui(self):
-        # =================================================================
-        # 1. TOP PROFESSIONAL DASHBOARD (2-Row Grid Style)
-        # =================================================================
-        top_container = QWidget()
-        top_grid = QGridLayout(top_container)
-        top_grid.setContentsMargins(1, 1, 1, 1)
-        top_grid.setSpacing(5)
-
-        # --- Column 0: Header (Spans both rows) ---
-        self.header = ProfessionalTheme.create_header_widget("Monitor")
-        self.header.setFixedWidth(550)
-        top_grid.addWidget(self.header, 0, 0, 1, 0)
-
-        # --- ROW 0, COL 2: Live Predictions (Priority Space) ---
-        out_grp = QGroupBox("Live Predictions & Safety Status")
-        ProfessionalTheme.apply_professional_panel_style(out_grp)
-        out_lay = QHBoxLayout(out_grp)
-        out_lay.setContentsMargins(20, 12, 20, 12)
-        out_lay.setSpacing(5)
-        
-        self.predict_s1 = QLabel("P1: --"); self.predict_s2 = QLabel("P2: --"); self.predict_s3 = QLabel("P3: --")
-        self.lbl_fs_status = QLabel("FS STATUS: WAITING")
-        
-        style_val = f"font-weight: bold; color: {ProfessionalTheme.SUCCESS_GREEN}; background: {ProfessionalTheme.CONSOLE_BG}; padding: 10px; border-radius: 6px; min-width: 130px; font-size: 11pt; border: 1px solid #34495e;"
-        for lbl in [self.predict_s1, self.predict_s2, self.predict_s3]:
-            lbl.setStyleSheet(style_val); lbl.setAlignment(Qt.AlignmentFlag.AlignCenter); out_lay.addWidget(lbl)
-        
-        self.lbl_fs_status.setStyleSheet(f"font-weight: bold; color: white; background: {ProfessionalTheme.PRIMARY_BLUE}; padding: 10px; border-radius: 6px; min-width: 180px; font-size: 11pt; border: 2px solid {ProfessionalTheme.ACCENT_BLUE};")
-        self.lbl_fs_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        out_lay.addWidget(self.lbl_fs_status)
-        top_grid.addWidget(out_grp, 0, 2)
-        
-        # --- ROW 1, COL 1: Visualization Controls (Compact) ---
-        view_grp = QGroupBox("Visualization")
-        ProfessionalTheme.apply_professional_panel_style(view_grp)
-        view_lay = QHBoxLayout(view_grp)
-        view_lay.setContentsMargins(12, 8, 12, 8)
-        view_lay.setSpacing(5)
-
-        self.PrimaryModeCombo = QComboBox(); self.PrimaryModeCombo.addItems(["Failure", "Stress"])
-        self.PrimaryModeCombo.setFixedWidth(90)
-        self.PrimaryModeCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
-        
-        self.options_stack = QStackedWidget()
-        # Failure Settings
-        fail_container = QWidget(); fail_lay = QHBoxLayout(fail_container); fail_lay.setContentsMargins(0,0,0,0)
-        self.FailDisplayCombo = QComboBox(); self.FailDisplayCombo.addItems(["FS", "Intensity"])
-        self.FailDisplayCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
-        self.FailMethodCombo = QComboBox(); self.FailMethodCombo.addItems(["Von Mises", "Max Principal", "Max Shear"])
-        self.FailMethodCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
-        fail_lay.addWidget(self.FailDisplayCombo); fail_lay.addWidget(self.FailMethodCombo)
-        self.options_stack.addWidget(fail_container)
-        # Stress Settings
-        stress_container = QWidget(); stress_lay = QHBoxLayout(stress_container); stress_lay.setContentsMargins(0,0,0,0)
-        self.StressTypeCombo = QComboBox(); self.StressTypeCombo.addItems(["Sigma_xx", "Sigma_yy", "Sigma_zz", "Tau_xy", "Tau_yz", "Tau_zx"])
-        self.StressTypeCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
-        stress_lay.addWidget(self.StressTypeCombo); self.options_stack.addWidget(stress_container)
-
-        self.PrimaryModeCombo.currentIndexChanged.connect(self.options_stack.setCurrentIndex)
-        
-        view_lay.addWidget(self.PrimaryModeCombo); view_lay.addWidget(self.options_stack)
-        self.btn_reset_cam = QPushButton("🎥 Reset View")
-        self.btn_reset_cam.setFixedWidth(100)
-        self.btn_reset_cam.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.TEXT_GRAY, width=95))
-        view_lay.addWidget(self.btn_reset_cam)
-        
-        top_grid.addWidget(view_grp, 1, 1)
-
-        # --- ROW 1: Hardware Interface (SPACED & PROFESSIONAL) ---
-        in_grp = QGroupBox("Cyber-Physical Hardware Interface")
-        ProfessionalTheme.apply_professional_panel_style(in_grp)
-        in_lay = QHBoxLayout(in_grp)
-        in_lay.setContentsMargins(20, 12, 20, 12)
-        in_lay.setSpacing(12)
-        
-        # Zone 1: Buttons
-        self.btn_connect_hw = QPushButton("🔌 Connect")
-        self.btn_connect_hw.setFixedWidth(110)
-        self.btn_connect_hw.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=110))
-        
-        self.btn_go_live = QPushButton("▶ LIVE")
-        self.btn_go_live.setFixedWidth(95)
-        self.btn_go_live.setCheckable(True)
-        self.btn_go_live.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.SUCCESS_GREEN, width=95))
-        
-        in_lay.addWidget(self.btn_connect_hw)
-        in_lay.addWidget(self.btn_go_live)
-        
-        # Separator line
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.VLine)
-        separator.setStyleSheet(f"color: {ProfessionalTheme.BORDER_LIGHT};")
-        in_lay.addWidget(separator)
-
-        
-
-        # Helper to create professional readout clusters
-        def add_readout(label_text, widget):
-            container = QVBoxLayout()
-            lbl = QLabel(f"{label_text}")
-            lbl.setStyleSheet(f"font-size: 8pt; color: {ProfessionalTheme.TEXT_GRAY}; font-weight: 500; text-align: center;")
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            widget.setFixedWidth(80)
-            widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            widget.setStyleSheet(f"background: {ProfessionalTheme.CONSOLE_BG}; color: #00ff00; font-weight: bold; font-size: 11pt; border: 1px solid {ProfessionalTheme.BORDER_COLOR}; border-radius: 4px; padding: 5px; font-family: 'Courier New';")
-            container.addWidget(lbl)
-            container.addWidget(widget)
-            in_lay.addLayout(container)
-
-        self.in_Load = QLineEdit("0.0"); self.in_S1 = QLineEdit("0"); self.in_S2 = QLineEdit("0")
-        self.in_S3 = QLineEdit("0"); self.in_Ultra = QLineEdit("0.0")
-        
-        for w in [self.in_Load, self.in_S1, self.in_S2, self.in_S3, self.in_Ultra]: w.setReadOnly(True)
-
-        # Adding readouts with structured spacing
-        add_readout("LOAD\n(N)", self.in_Load)
-        add_readout("SG-1\n(uE)", self.in_S1)
-        add_readout("SG-2\n(uE)", self.in_S2)
-        add_readout("SG-3\n(uE)", self.in_S3)
-        add_readout("POS\n(mm)", self.in_Ultra)
-        
-        in_lay.addStretch()
-        
-        top_grid.addWidget(in_grp, 1, 2, 1, 1)  # Move to Row 1, Col 2 (top right)
-
-        # Set Column Stretching - balance space for more graphics area
-        top_grid.setColumnStretch(1, 3) # More space for future graphics expansion
-        top_grid.setColumnStretch(2, 2) # Hardware + Visualization compact area
-
-        self.main_layout.addWidget(top_container)
-
-        # =================================================================
-        # 2. MAIN CONTENT AREA (Graphics + Plots)
-        # =================================================================
-        content_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.graphics_tabs = QTabWidget()
-
-        # Tab A: 3D View
-        self.tab_3d = QWidget(); layout_3d = QVBoxLayout(self.tab_3d)
-        self.UIAxes_3D = QtInteractor(); layout_3d.addWidget(self.UIAxes_3D)
-        self.graphics_tabs.addTab(self.tab_3d, "3D Isometric View")
-
-        # Tab B: 2D View (3 SUBPLOT STYLE)
-        self.tab_2d = QWidget(); layout_2d = QVBoxLayout(self.tab_2d)
-        sec_ctrl_lay = QHBoxLayout()
-        self.TopSliceCombo = QComboBox(); self.TopSliceCombo.addItems(["Top", "Axis", "Bottom"])
-        self.ViewSectionSlider = QSlider(Qt.Orientation.Horizontal); self.ViewSectionSlider.setRange(0, 100); self.ViewSectionSlider.setValue(50)
-        self.lbl_sec = QLabel(f"Section Cut (X): {self.geometry.get('Lx',1.0)/2:.2f} m")
-        sec_ctrl_lay.addWidget(QLabel("Slice:")); sec_ctrl_lay.addWidget(self.TopSliceCombo)
-        sec_ctrl_lay.addSpacing(20); sec_ctrl_lay.addWidget(self.lbl_sec); sec_ctrl_lay.addWidget(self.ViewSectionSlider)
-        layout_2d.addLayout(sec_ctrl_lay)
-
-        def wrap_canvas(interactor):
-            frame = QFrame(); frame.setStyleSheet("QFrame { border: 2px solid #7f8c8d; border-radius: 4px; background: white; }")
-            lay = QVBoxLayout(frame); lay.setContentsMargins(2,2,2,2); lay.addWidget(interactor); return frame
-
-        self.UIAxes_2D_Front = QtInteractor(); self.UIAxes_2D_Top = QtInteractor(); self.UIAxes_2D_Sec = QtInteractor()
-        grid_2d = QGridLayout(); grid_2d.setSpacing(10)
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Front), 0, 0, 2, 3) 
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Top), 2, 0, 1, 2)
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Sec), 2, 2, 1, 1)
-        layout_2d.addLayout(grid_2d)
-        self.graphics_tabs.addTab(self.tab_2d, "2D Orthographic Views")
-
-        content_splitter.addWidget(self.graphics_tabs)
-
-        # Right Side Plots
-        plots_grp = QGroupBox("Analysis Plots")
-        ProfessionalTheme.apply_professional_panel_style(plots_grp)
-        plots_lay = QVBoxLayout(plots_grp)
-        self.line_figure = Figure(figsize=(4, 6), tight_layout=True); self.line_canvas = FigureCanvas(self.line_figure)
-        plots_lay.addWidget(self.line_canvas); content_splitter.addWidget(plots_grp)
-        
-        # Increase graphics area: ratio 75% graphics, 25% plots
-        content_splitter.setSizes([1350, 450])
-        self.main_layout.addWidget(content_splitter, 1)
-
-        # --- SIGNAL CONNECTIONS ---
-        self.btn_connect_hw.clicked.connect(self.attempt_connect)
-        self.btn_go_live.toggled.connect(self.toggle_live_feed)
-        self.ViewSectionSlider.valueChanged.connect(self.on_section_change)
-        for w in [self.PrimaryModeCombo, self.FailDisplayCombo, self.FailMethodCombo, self.StressTypeCombo]:
-            w.currentTextChanged.connect(self.update_visuals_only)
-    # =================================================================
-    # UI LOGIC & HARDWARE THREADING
-    # =================================================================
-    def attempt_connect(self):
-        if self.launcher.calib_window: self.launcher.calib_window.handle_connect()
-        else:
-            if self.sm.connect(): QMessageBox.information(self, "Hardware", "Direct Connection Successful")
-            else: QMessageBox.warning(self, "Hardware Error", "Could not connect to Arduino.")
-
-    def toggle_live_feed(self, checked):
-        if checked:
-            self.btn_go_live.setText("⏹ STOP")
-            self.btn_go_live.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ERROR_RED, width=95))
-            self.hw_worker.start()
-        else:
-            self.btn_go_live.setText("▶ LIVE")
-            self.btn_go_live.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.SUCCESS_GREEN, width=95))
-            self.hw_worker.stop()
-
-    def handle_thread_error(self, err_msg):
-        print(f"Hardware Thread Error:\n{err_msg}")
-        self.btn_go_live.setChecked(False)
-
-    def switch_render_options(self, index):
-        self.options_stack.setCurrentIndex(index)
-        self.update_visuals_only()
-
-    def toggle_color_limits(self):
-        is_auto = self.AutoColorLimitSwitch.isChecked()
-        self.CMinEdit.setEnabled(not is_auto); self.CMaxEdit.setEnabled(not is_auto)
-        self.btn_apply_color.setEnabled(not is_auto)
-        self.update_visuals_only()
-
-    def on_section_change(self, val):
-        pos_m = (val / 100.0) * self.geometry['Lx']
-        self.lbl_sec.setText(f"<b>View Section Cut (X):</b> {pos_m:.2f} m")
-        if self.graphics_tabs.currentIndex() == 1: self.update_visuals_only()
-
-    def reset_camera_view(self):
-        if hasattr(self, 'UIAxes_3D'):
-            self.UIAxes_3D.view_isometric(); self.UIAxes_3D.reset_camera(); self.UIAxes_3D.render()
-        if hasattr(self, 'UIAxes_2D_Top'):
-            self.UIAxes_2D_Top.view_xy(negative=("Bottom" in self.TopSliceCombo.currentText()))
-            self.UIAxes_2D_Top.camera.parallel_projection = True
-            self.UIAxes_2D_Top.reset_camera(); self.UIAxes_2D_Top.render()
-        if hasattr(self, 'UIAxes_2D_Front'):
-            self.UIAxes_2D_Front.view_xz(); self.UIAxes_2D_Front.camera.parallel_projection = True
-            self.UIAxes_2D_Front.reset_camera(); self.UIAxes_2D_Front.render()
-        if hasattr(self, 'UIAxes_2D_Sec'):
-            self.UIAxes_2D_Sec.view_yz(); self.UIAxes_2D_Sec.camera.parallel_projection = True
-            self.UIAxes_2D_Sec.reset_camera(); self.UIAxes_2D_Sec.render()
-
-    # =================================================================
-    # REAL-TIME MATH (Triggered by Hardware Thread)
-    # =================================================================
-    def process_live_data(self, strains, force_n, p_mm):
-        if self._is_rendering: return 
-        self._is_rendering = True
-        
-        try:
-            # 1. Update Input Box Text
-            self.in_Load.setText(f"{force_n:.1f}")
-            self.in_s1.setText(f"{strains[0]:.1f}"); self.in_s2.setText(f"{strains[1]:.1f}"); self.in_s3.setText(f"{strains[2]:.1f}")
-            self.in_Lposition.setText(f"{p_mm:.1f}")
-
-            # 2. Logic & ROM Selection
-            strains_array = np.array(strains)
-            target = 'Fix' if (abs(strains[0]) > abs(strains[1]) or abs(strains[2]) > abs(strains[1])) else ('Simply' if np.argmax(np.abs(strains_array)) == 1 else 'Cant')
-            self.Active_ROM = next((r for r in self.DT_Bank if target.lower() in r['Label'].lower()), self.DT_Bank[0])
-
-            # 3. Inject Data to Offline Studio
-            self.launcher.offline_studio.node_coords = self.Active_ROM['Nodes']
-            self.launcher.offline_studio.element_type = self.Active_ROM['ElementType']
-            if 'Connectivity' in self.Active_ROM: self.launcher.offline_studio.element_connectivity = self.Active_ROM['Connectivity']
-            else:
-                self.hw_worker.stop(); self.btn_go_live.setChecked(False)
-                print("CRITICAL: ROM missing Connectivity. Re-save in Module 1.")
-                return
-
-            # 4. Math Projection
-            Lx = self.geometry['Lx']
-            load_pos_m = max(0, min(p_mm / 1000.0, Lx))
-            
-            temp_loads = self.launcher.offline_studio.define_loads_at_pos(load_pos_m, force_n)
-            num_nodes = self.Active_ROM['NumNodes']; F_temp = np.zeros(num_nodes * 3)
-            for j in range(len(temp_loads['point_nodes'])):
-                node_id = temp_loads['point_nodes'][j]; force_vec = temp_loads['point_load_values'][:, j]
-                F_temp[node_id*3 : node_id*3+3] += force_vec
-            
-            active_free_dofs = self.Active_ROM['bc_info']['free_dofs_indices']
-            F_red = F_temp[active_free_dofs]
-            alpha = np.linalg.solve(self.Active_ROM['K_rom'], self.Active_ROM['Phi'].T @ F_red)
-            
-            self.current_U = np.zeros(num_nodes * 3); self.current_U[active_free_dofs] = self.Active_ROM['Phi'] @ alpha
-            self.current_Sigma = (self.Active_ROM['Phi_stress'] @ alpha).reshape((num_nodes, 6))
-
-            # 5. Update Output Box (Predictions)
-            nodes = self.Active_ROM['Nodes']
-            loc_1= self.pre_s1_loc.text().strip()
-            loc_2= self.pre_s2_loc.text().strip()
-            loc_3= self.pre_s3_loc.text().strip()
-            # sensor is install at the lower fiber layer, so we look for nodes near the bottom (minz) at specified x locations
-            tol_x = Lx * 0.02  # 2% tolerance for x-coordinate matching
-            
-            # Parse user-input locations, use defaults if invalid
-            try: x_loc_1 = float(loc_1)
-            except: x_loc_1 = Lx * 0.25
-            try: x_loc_2 = float(loc_2)
-            except: x_loc_2 = Lx * 0.50
-            try: x_loc_3 = float(loc_3)
-            except: x_loc_3 = Lx * 0.75
-            
-            # Find nodes near x=x_loc_1 with minimum z (lower fiber layer)
-            mask_s1 = np.abs(nodes[:,0] - x_loc_1) < tol_x
-            idx_s1 = np.where(mask_s1)[0][np.argmin(nodes[mask_s1, 2])] if np.any(mask_s1) else np.argmin(np.abs(nodes[:,0] - x_loc_1))
-            
-            # Find nodes near x=x_loc_2 with minimum z (lower fiber layer)
-            mask_s2 = np.abs(nodes[:,0] - x_loc_2) < tol_x
-            idx_s2 = np.where(mask_s2)[0][np.argmin(nodes[mask_s2, 2])] if np.any(mask_s2) else np.argmin(np.abs(nodes[:,0] - x_loc_2))
-            
-            # Find nodes near x=x_loc_3 with minimum z (lower fiber layer)
-            mask_s3 = np.abs(nodes[:,0] - x_loc_3) < tol_x
-            idx_s3 = np.where(mask_s3)[0][np.argmin(nodes[mask_s3, 2])] if np.any(mask_s3) else np.argmin(np.abs(nodes[:,0] - x_loc_3))
-            
-            p1 = self.current_Sigma[idx_s1, 0] / self.launcher.offline_studio.material['E'] * 1e6
-            p2 = self.current_Sigma[idx_s2, 0] / self.launcher.offline_studio.material['E'] * 1e6
-            p3 = self.current_Sigma[idx_s3, 0] / self.launcher.offline_studio.material['E'] * 1e6
-            
-            e1 = abs(p1 - strains[0]) / max(abs(strains[0]), 1e-5) * 100
-            e2 = abs(p2 - strains[1]) / max(abs(strains[1]), 1e-5) * 100
-            e3 = abs(p3 - strains[2]) / max(abs(strains[2]), 1e-5) * 100
-            
-            self.predict_s1.setText(f"P1: {p1:.1f} uE  (Err: {e1:.1f}%)")
-            self.predict_s2.setText(f"P2: {p2:.1f} uE  (Err: {e2:.1f}%)")
-            self.predict_s3.setText(f"P3: {p3:.1f} uE  (Err: {e3:.1f}%)")
-            
-            try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
-            except: yield_strength = 250.0
-            
-            vm = np.sqrt(self.current_Sigma[:,0]**2 - self.current_Sigma[:,0]*self.current_Sigma[:,1] + self.current_Sigma[:,1]**2 + 3*self.current_Sigma[:,3]**2)
-            fs = yield_strength / max(np.max(vm)/1e6, 1e-9) 
-            
-            if fs < 1.0:
-                self.lbl_fs_status.setText("⚠️ FAILURE RISK ⚠️"); 
-                self.lbl_fs_status.setStyleSheet(f"font-size: 12pt; font-weight: bold; background: {ProfessionalTheme.ERROR_RED}; color: white; padding: 10px; border-radius: 6px; border: 2px solid #8B0000;")
-            else:
-                self.lbl_fs_status.setText(f"✓ FS: {fs:.2f} | SAFE"); 
-                self.lbl_fs_status.setStyleSheet(f"font-size: 12pt; font-weight: bold; background: {ProfessionalTheme.SUCCESS_GREEN}; color: white; padding: 10px; border-radius: 6px; border: 2px solid {ProfessionalTheme.HOVER_GREEN};")
-
-            self._update_graphics()
-
-        except Exception as e:
-            self.hw_worker.stop(); self.btn_go_live.setChecked(False)
-            print(traceback.format_exc())
-        finally:
-            self._is_rendering = False
-
-    # =================================================================
-    # GRAPHICS RENDERING ENGINE
-    # =================================================================
-    def update_visuals_only(self, *args):
-        if self.current_U is None: return
-        if self._is_rendering: return
-        self._is_rendering = True
-        try: self._update_graphics()
-        finally: self._is_rendering = False
-
-    def _update_graphics(self):
-        mode = self.PrimaryModeCombo.currentText()
-        try: sf = float(self.ScaleFactorEditField_2.text())
-        except: sf = 500.0 
-        try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
-        except: yield_strength = 250.0 
-
-        if self.AutoColorLimitSwitch.isChecked(): custom_clim = None
-        else:
-            try: c_min = float(self.CMinEdit.text())
-            except: c_min = -250.0
-            try: c_max = float(self.CMaxEdit.text())
-            except: c_max = 250.0
-            if c_min == c_max: c_max = c_min + 1e-6
-            custom_clim = [c_min, c_max]
-
-        if self.graphics_tabs.currentIndex() == 0:
-            if mode == "Stress": self.launcher.offline_studio.plot_stresses(self.current_Sigma, self.StressTypeCombo.currentText(), self.UIAxes_3D, self.current_U, sf, custom_clim=custom_clim)
-            else: self.launcher.offline_studio.plot_FS(self.FailMethodCombo.currentText(), yield_strength, self.UIAxes_3D, self.current_Sigma, self.current_U, sf, self.FailDisplayCombo.currentText(), custom_clim=custom_clim)
-            self.UIAxes_3D.add_text(f"Live Twin Active: {self.Active_ROM['Label']}", name="live_lbl", position='upper_right', color='red')
-            self.UIAxes_3D.update()
-
-        elif self.graphics_tabs.currentIndex() == 1:
-            self.render_2d_orthographic(custom_clim)
-
-        self.render_line_plots()
-
-    def get_plot_scalars(self):
-        mode = self.PrimaryModeCombo.currentText()
-        if mode == "Stress":
-            s_map = {'Sigma_xx': 0, 'Sigma_yy': 1, 'Sigma_zz': 2, 'Tau_xy': 3, 'Tau_yz': 4, 'Tau_zx': 5}
-            col = s_map.get(self.StressTypeCombo.currentText(), 0)
-            return self.current_Sigma[:, col] / 1e6, "jet", "Stress (MPa)"
-        else:
-            sx, sy, sz = self.current_Sigma[:, 0], self.current_Sigma[:, 1], self.current_Sigma[:, 2]
-            txy, tyz, tzx = self.current_Sigma[:, 3], self.current_Sigma[:, 4], self.current_Sigma[:, 5]
-            fail_mode = self.FailMethodCombo.currentText()
-            num_nodes = len(sx)
-            
-            if "von mises" in fail_mode.lower():
-                val = np.sqrt(0.5*((sx-sy)**2 + (sy-sz)**2 + (sz-sx)**2 + 6*(txy**2 + tyz**2 + tzx**2))) / 1e6
-            elif "principal" in fail_mode.lower() or "tresca" in fail_mode.lower() or "shear" in fail_mode.lower():
-                stress_tensors = np.zeros((num_nodes, 3, 3))
-                stress_tensors[:, 0, 0] = sx; stress_tensors[:, 0, 1] = txy; stress_tensors[:, 0, 2] = tzx
-                stress_tensors[:, 1, 0] = txy; stress_tensors[:, 1, 1] = sy;  stress_tensors[:, 1, 2] = tyz
-                stress_tensors[:, 2, 0] = tzx; stress_tensors[:, 2, 1] = tyz; stress_tensors[:, 2, 2] = sz
-                eigenvalues = np.linalg.eigvalsh(stress_tensors)
-                if "principal" in fail_mode.lower(): val = eigenvalues[:, 2] / 1e6
-                else: val = (eigenvalues[:, 2] - eigenvalues[:, 0]) / 2.0 / 1e6
-            else: val = np.sqrt(0.5*((sx-sy)**2 + (sy-sz)**2 + (sz-sx)**2 + 6*(txy**2 + tyz**2 + tzx**2))) / 1e6
-                
-            if self.FailDisplayCombo.currentText() == "Stress": return val, "jet", "Stress (MPa)"
-            else:
-                try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
-                except: yield_strength = 250.0 
-                return yield_strength / np.maximum(val, 1e-6), "jet_r", "Factor of Safety"
-
-    def render_2d_orthographic(self, custom_clim=None):
-        if self.current_U is None: return
-        scalars, cmap ,plot_name = self.get_plot_scalars()
-        try: sf = float(self.ScaleFactorEditField_2.text())
-        except: sf = 500.0
-
-        nodes = self.Active_ROM['Nodes']
-        U_nodes = self.current_U.reshape(-1, 3)
-        def_coords = nodes + (U_nodes * sf)
-
-        if custom_clim is not None:
-            c_limits = custom_clim
-        else:
-            s_min, s_max = np.min(scalars), np.max(scalars)
-            if s_min == s_max: s_max = s_min + 1e-6
-            c_limits = [s_min, s_max]
-            
-        sargs_horiz = dict(title_font_size=10, label_font_size=8, shadow=False, n_labels=3, fmt="%.1f", vertical=False, position_x=0.05, position_y=0.02, width=0.9, height=0.08)
-        sargs_vert = dict(title_font_size=10, label_font_size=8, shadow=False, n_labels=3, fmt="%.1f", vertical=True, position_x=0.88, position_y=0.05, width=0.08, height=0.85)
-
-        for ax in [self.UIAxes_2D_Top, self.UIAxes_2D_Front, self.UIAxes_2D_Sec]:
-            try: ax.clear_scalar_bars()
-            except:
-                for key in list(ax.scalar_bars.keys()): ax.remove_scalar_bar(key)
-
-        # 1. Top View (Static Undeformed)
-        z_max, z_min = np.max(nodes[:, 2]), np.min(nodes[:, 2])
-        top_choice = self.TopSliceCombo.currentText()
-        if "Top" in top_choice: target_z = z_max
-        elif "Bottom" in top_choice: target_z = z_min
-        else: target_z = (z_max + z_min) / 2.0
-        
-        idx_top = np.where(np.abs(nodes[:, 2] - target_z) < 1e-4)[0]
-        if len(idx_top) > 0:
-            surf_top = pv.PolyData(nodes[idx_top]).delaunay_2d()
-            surf_top[plot_name] = scalars[idx_top]
-            self.UIAxes_2D_Top.add_mesh(surf_top, name='top', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=0.5, scalar_bar_args=sargs_horiz, reset_camera=False)
-        else: self.UIAxes_2D_Top.add_mesh(pv.PolyData(), name='top', reset_camera=False)
-
-        self.UIAxes_2D_Top.add_text(f"Top View (XY) | Layer: {top_choice}", name='txt_top', font_size=10, color='black')
-        
-        cam_front = self.UIAxes_2D_Front.camera_position if hasattr(self, '_2d_cams_initialized') else None
-        if 'Hexa' in self.launcher.offline_studio.element_type: n_vis = 8; vtk_type = pv.CellType.HEXAHEDRON
-        else: n_vis = 4; vtk_type = pv.CellType.TETRA
-        cells_dict = {vtk_type: self.launcher.offline_studio.element_connectivity[:, :n_vis]}
-        grid_deformed = pv.UnstructuredGrid(cells_dict, def_coords)
-        grid_deformed.point_data[plot_name] = scalars
-
-        y_cut = (grid_deformed.bounds[2] + grid_deformed.bounds[3]) / 2.0 
-        try:
-            front_slice = grid_deformed.slice(normal='y', origin=(0, y_cut, 0))
-            self.UIAxes_2D_Front.add_mesh(front_slice, name='front', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=1.5, scalar_bar_args=sargs_vert, reset_camera=False)
-        except: self.UIAxes_2D_Front.add_mesh(pv.PolyData(), name='front', reset_camera=False)
-        self.UIAxes_2D_Front.add_text("Front View (XZ) | Deformed Axis Slice", name='txt_front', font_size=10, color='black')
-        if cam_front is not None: self.UIAxes_2D_Front.camera_position = cam_front
-
-        # 3. Section View (Static Undeformed)
-        cut_x = (self.SectionSlider.value() / 100.0) * self.geometry['Lx']
-        unique_x = np.unique(np.round(nodes[:, 0], decimals=4))
-        closest_x = unique_x[np.argmin(np.abs(unique_x - cut_x))]
-        idx_sec = np.where(np.abs(nodes[:, 0] - closest_x) < 1e-4)[0]
-        
-        if len(idx_sec) > 0:
-            pts_yz = nodes[idx_sec].copy(); pts_yz[:, 0] = 0 
-            surf_sec = pv.PolyData(pts_yz).delaunay_2d(); surf_sec.points[:, 0] = nodes[idx_sec, 0] 
-            surf_sec[plot_name] = scalars[idx_sec]
-            self.UIAxes_2D_Sec.add_mesh(surf_sec, name='section', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=0.5, scalar_bar_args=sargs_horiz, reset_camera=False)
-        else: self.UIAxes_2D_Sec.add_mesh(pv.PolyData(), name='section', reset_camera=False)
-        self.UIAxes_2D_Sec.add_text(f"Section Cut (YZ) | X={closest_x:.2f}m", name='txt_sec', font_size=10, color='black')
-
-        if not hasattr(self, '_2d_cams_initialized'):
-            self.UIAxes_2D_Top.view_xy(negative=("Bottom" in top_choice)); self.UIAxes_2D_Top.camera.parallel_projection = True
-            self.UIAxes_2D_Front.view_xz(); self.UIAxes_2D_Front.camera.parallel_projection = True
-            self.UIAxes_2D_Sec.view_yz(); self.UIAxes_2D_Sec.camera.parallel_projection = True
-            self.reset_camera_view()
-            self._2d_cams_initialized = True
-
-        self.UIAxes_2D_Top.render(); self.UIAxes_2D_Front.render(); self.UIAxes_2D_Sec.render()
-
-    def render_line_plots(self):
-        nodes = self.Active_ROM['Nodes']
-        y_top, y_bot = np.max(nodes[:, 1]), np.min(nodes[:, 1])
-        y_mid = (y_top + y_bot) / 2.0  
-        x_line = np.linspace(0, self.geometry['Lx'], 50)
-        
-        defl, s_top, s_bot, s_shear = [], [], [], []
-        for x in x_line:
-            idx_t = np.argmin(np.sqrt((nodes[:, 0]-x)**2 + (nodes[:, 1]-y_top)**2))
-            idx_b = np.argmin(np.sqrt((nodes[:, 0]-x)**2 + (nodes[:, 1]-y_bot)**2))
-            idx_m = np.argmin(np.sqrt((nodes[:, 0]-x)**2 + (nodes[:, 1]-y_mid)**2))
-            defl.append(self.current_U[idx_t * 3 + 1] * 1000) 
-            s_top.append(self.current_Sigma[idx_t, 0] / 1e6)              
-            s_bot.append(self.current_Sigma[idx_b, 0] / 1e6) 
-            s_shear.append(self.current_Sigma[idx_m, 3] / 1e6) 
-            
-        if not hasattr(self, '_line_initialized'):
-            self.line_figure.clear()
-            self.axL1 = self.line_figure.add_subplot(311); self.l_defl, = self.axL1.plot(x_line, defl, 'b', linewidth=2); self.axL1.set_title("Deflection (mm)"); self.axL1.grid(True)
-            self.axL2 = self.line_figure.add_subplot(312); self.l_top, = self.axL2.plot(x_line, s_top, 'r', label='Top Fiber'); self.l_bot, = self.axL2.plot(x_line, s_bot, 'g', label='Bottom Fiber'); self.axL2.set_title("Bending Stress (MPa)"); self.axL2.legend(); self.axL2.grid(True)
-            self.axL3 = self.line_figure.add_subplot(313); self.l_shear, = self.axL3.plot(x_line, s_shear, 'k', label='Neutral Axis'); self.axL3.set_title("Shear Stress (MPa)"); self.axL3.legend(); self.axL3.grid(True)
-            self.line_figure.tight_layout(); self._line_initialized = True
-        else:
-            self.l_defl.set_ydata(defl); self.l_top.set_ydata(s_top); self.l_bot.set_ydata(s_bot); self.l_shear.set_ydata(s_shear)
-            for ax in [self.axL1, self.axL2, self.axL3]: ax.relim(); ax.autoscale_view()
-        self.line_canvas.draw_idle()
-
-    def closeEvent(self, event):
-        if hasattr(self, 'hw_worker'): self.hw_worker.stop()
-        try: self.UIAxes_3D.close(); self.UIAxes_2D_Top.close(); self.UIAxes_2D_Front.close(); self.UIAxes_2D_Sec.close()
-        except: pass
-        if hasattr(self, 'launcher') and self.launcher: self.launcher.live_window = None 
-        event.accept()
-# =========================================================================
-# 4. OFFLINE STUDIO (MODULE 1) - ANSYS WORKBENCH STYLE
+# 1. OFFLINE STUDIO (MODULE 1) - ANSYS WORKBENCH STYLE
 # =========================================================================
 class OfflinePreparationStudio(QMainWindow):
     """The Main Offline Studio, utilizing a Workflow Tree instead of Tabs."""
@@ -3015,8 +2278,193 @@ class OfflinePreparationStudio(QMainWindow):
                 if hasattr(self, 'DT_Bank'): self.DT_Bank = []
                 QMessageBox.information(self, "Success", "ROM Bank has been deleted from disk.") 
 
+
+# =========================================================================
+# 2. CALIBRATION BAY (MODULE 2)
+# =========================================================================
+class CalibrationWindow(QMainWindow):
+    def __init__(self, sensor_manager, parent_geometry):
+        super().__init__()
+        self.setWindowTitle("Module 2: Hardware Calibration Bay")
+        self.setGeometry(200, 200, 1000, 600)
+        self.sm = sensor_manager
+        self.beam_geometry = parent_geometry
+        
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.layout = QHBoxLayout(self.central_widget)
+        
+        self.build_ui()
+        self.live_timer = QTimer()
+        self.live_timer.timeout.connect(self.update_live_dashboard)
+        
+    def build_ui(self):
+        left = QVBoxLayout(); mid = QVBoxLayout(); right = QVBoxLayout()
+
+        c_grp = QGroupBox("Hardware Controls"); c_lay = QFormLayout()
+        ProfessionalTheme.apply_professional_panel_style(c_grp)
+        self.btn_conn = QPushButton("🔌 Connect Arduino")
+        self.btn_conn.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=140))
+        self.btn_conn.clicked.connect(self.handle_connect)
+        self.lbl_status = QLabel("⚪ Disconnected")
+        self.lbl_status.setStyleSheet(f"color: {ProfessionalTheme.TEXT_GRAY}; font-weight: 500;")
+        
+        self.btn_load_tare = QPushButton("📊 Tare Load Cell")
+        self.btn_load_tare.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.INFO_PURPLE, width=140))
+        self.btn_load_tare.clicked.connect(self.tare_load)
+        self.m_input = QLineEdit("1.0")
+        self.m_input.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 6px; font-size: 10pt;")
+        self.btn_load_cal = QPushButton("⚙️ Set Load Factor")
+        self.btn_load_cal.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=140))
+        self.btn_load_cal.clicked.connect(self.calibrate_load)
+        
+        self.btn_strain_tare = QPushButton("📈 Tare Strain")
+        self.btn_strain_tare.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.INFO_PURPLE, width=140))
+        self.btn_strain_tare.clicked.connect(self.tare_strain)
+        self.d_input = QLineEdit("1.0")
+        self.d_input.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 6px; font-size: 10pt;")
+        self.btn_strain_cal = QPushButton("⚙️ Set AMP_GAIN")
+        self.btn_strain_cal.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=140))
+        self.btn_strain_cal.clicked.connect(self.calibrate_gain)
+
+        c_lay.addRow(self.btn_conn, self.lbl_status); c_lay.addRow(self.btn_load_tare)
+        c_lay.addRow("Standard Mass (kg):", self.m_input); c_lay.addRow(self.btn_load_cal)
+        c_lay.addRow(self.btn_strain_tare); c_lay.addRow("Dial Gauge (mm):", self.d_input)
+        c_lay.addRow(self.btn_strain_cal); c_grp.setLayout(c_lay); left.addWidget(c_grp)
+
+        v_grp = QGroupBox("Validation Mode"); v_lay = QFormLayout()
+        ProfessionalTheme.apply_professional_panel_style(v_grp)
+        self.mode = QComboBox(); self.mode.addItems(["Fixed-Fixed", "Simply Supported", "Cantilever"])
+        self.pos_x = QLineEdit("250.0")
+        v_lay.addRow("Beam Boundary:", self.mode); v_lay.addRow("Gauge X (mm):", self.pos_x)
+        v_grp.setLayout(v_lay); left.addWidget(v_grp); left.addStretch()
+
+        self.log_a = QTextEdit(); self.log_a.setReadOnly(True)
+        self.log_a.setStyleSheet(f"background: {ProfessionalTheme.CONSOLE_BG}; color: {ProfessionalTheme.CONSOLE_TEXT}; font-family: Courier; border: 1px solid {ProfessionalTheme.BORDER_COLOR}; border-radius: 4px;")
+        mid.addWidget(QLabel("<b style='color: {ProfessionalTheme.PRIMARY_BLUE};'>Process Log:</b>")); mid.addWidget(self.log_a)
+        
+        f_grp = QGroupBox("Derived Factors"); f_lay = QFormLayout()
+        ProfessionalTheme.apply_professional_panel_style(f_grp)
+        self.l_fac = QLabel("1.0"); self.a_fac = QLabel("100.0")
+        f_lay.addRow("Load Factor (bits/kg):", self.l_fac); f_lay.addRow("AMP_GAIN:", self.a_fac)
+        f_grp.setLayout(f_lay); mid.addWidget(f_grp)
+
+        d_grp = QGroupBox("Live Readouts"); d_lay = QGridLayout()
+        ProfessionalTheme.apply_professional_panel_style(d_grp)
+        self.l_load = QLabel("0.00 N"); self.l_s1 = QLabel("0.0 uE"); self.l_s2 = QLabel("0.0 uE")
+        self.l_s3 = QLabel("0.0 uE"); self.l_virt = QLabel("0.00 mm"); self.l_pos = QLabel("0.00 mm")
+        
+        style = f"font-size: 14pt; font-weight: bold; color: {ProfessionalTheme.SUCCESS_GREEN}; background: {ProfessionalTheme.CONSOLE_BG}; padding: 8px; border-radius: 4px; border: 1px solid {ProfessionalTheme.PRIMARY_BLUE};"
+        for lbl in [self.l_load, self.l_s1, self.l_s2, self.l_s3, self.l_virt, self.l_pos]: lbl.setStyleSheet(style)
+        
+        d_lay.addWidget(QLabel("Force:"), 0, 0); d_lay.addWidget(self.l_load, 0, 1)
+        d_lay.addWidget(QLabel("Strain Support Left:"), 1, 0); d_lay.addWidget(self.l_s1, 1, 1)
+        d_lay.addWidget(QLabel("Strain Mid:"), 2, 0); d_lay.addWidget(self.l_s2, 2, 1)
+        d_lay.addWidget(QLabel("Strain Support Right:"), 3, 0); d_lay.addWidget(self.l_s3, 3, 1)
+        d_lay.addWidget(QLabel("VIRTUAL DIAL:"), 4, 0); d_lay.addWidget(self.l_virt, 4, 1)
+        d_lay.addWidget(QLabel("Position:"), 5, 0); d_lay.addWidget(self.l_pos, 5, 1)
+        d_grp.setLayout(d_lay); right.addWidget(d_grp)
+
+        self.t_def = QTableWidget(5, 4); self.t_def.setHorizontalHeaderLabels(["Pt", "Physical (mm)", "Virtual (mm)", "Error %"])
+        self.t_lod = QTableWidget(5, 5); self.t_lod.setHorizontalHeaderLabels(["Pt", "Mass (kg)", "Ref (N)", "Live (N)", "Error %"])
+        self.t_pos = QTableWidget(5, 4); self.t_pos.setHorizontalHeaderLabels(["Pt", "Manual (mm)", "Ultra (mm)", "Error %"])
+
+        for t in [self.t_def, self.t_lod, self.t_pos]:
+            for i in range(5): 
+                t.setItem(i, 0, QTableWidgetItem(f"Pt {i+1}"))
+                for col in range(1, t.columnCount()): t.setItem(i, col, QTableWidgetItem("0.0"))
+
+        self.t_def.itemChanged.connect(self.auto_fill_def)
+        self.t_lod.itemChanged.connect(self.auto_fill_lod)
+        self.t_pos.itemChanged.connect(self.auto_fill_pos)
+
+        r_def = QPushButton("Refresh Deflection Table"); r_def.clicked.connect(lambda: self.clear_table(self.t_def))
+        r_lod = QPushButton("Refresh Load Table"); r_lod.clicked.connect(lambda: self.clear_table(self.t_lod))
+        r_pos = QPushButton("Refresh Position Table"); r_pos.clicked.connect(lambda: self.clear_table(self.t_pos))
+
+        right.addWidget(QLabel("<b>Deflection Validation</b>")); right.addWidget(self.t_def); right.addWidget(r_def)
+        right.addWidget(QLabel("<b>Load Validation</b>")); right.addWidget(self.t_lod); right.addWidget(r_lod)
+        right.addWidget(QLabel("<b>Position Validation</b>")); right.addWidget(self.t_pos); right.addWidget(r_pos)
+
+        self.layout.addLayout(left, 1); self.layout.addLayout(mid, 2); self.layout.addLayout(right, 3)
+        
+    def showEvent(self, event):
+        self.live_timer.start(100); super().showEvent(event)
+        
+    def closeEvent(self, event):
+        self.live_timer.stop(); event.accept()
+
+    def handle_connect(self):
+        if self.sm.connect(): self.lbl_status.setText("Connected"); self.log("Serial Ready.")
+
+    def tare_load(self):
+        raw = self.sm.get_average_raw(20); self.sm.load_tare = raw[0]; self.log("Load Tared.")
+
+    def calibrate_load(self):
+        raw = self.sm.get_average_raw(20); self.sm.load_calib_factor = (raw[0] - self.sm.load_tare) / float(self.m_input.text())
+        self.l_fac.setText(f"{self.sm.load_calib_factor:.4f}"); self.log("Load Factor Set.")
+
+    def tare_strain(self):
+        raw = self.sm.get_average_raw(30); self.sm.strain_zero_bits = raw[2]; self.log("Strain Tared.")
+
+    def calibrate_gain(self):
+        raw = self.sm.get_average_raw(30); dial_m = float(self.d_input.text()) / 1000.0
+        BEAM_H, BEAM_L = self.beam_geometry['Lz'], self.beam_geometry['Lx']
+        eps = (12.0 * BEAM_H * dial_m) / (BEAM_L**2)
+        dV = ((raw[2] - self.sm.strain_zero_bits) * 5.0) / 1023.0
+        self.sm.amp_gain = (4.0 * dV) / (eps * self.sm.GF * self.sm.V_IN)
+        self.a_fac.setText(f"{self.sm.amp_gain:.2f}"); self.log("Gain Set.")
+
+    def update_live_dashboard(self):
+        raw = self.sm.get_average_raw(1)
+        if raw is not None:
+            force_n = ((raw[0] - self.sm.load_tare) / self.sm.load_calib_factor) * self.sm.GRAVITY
+            strains = [((raw[i] - self.sm.strain_zero_bits)*5.0/1023.0)*4e6/(self.sm.GF*self.sm.V_IN*self.sm.amp_gain) for i in range(1,4)]
+            mode = self.mode.currentIndex(); L, H = self.beam_geometry['Lx'], self.beam_geometry['Lz']
+            e = strains[1]/1e6
+            if mode == 0: v = (e*L**2)/(12*H)
+            elif mode == 1: v = (e*L**2)/(6*H)
+            else: v = (e*(float(self.pos_x.text())/1000.0)**2)/(3*H)
+            p_mm = (raw[4] *0.343)/2
+            self.l_load.setText(f"{force_n:.2f} N") 
+            self.l_s2.setText(f"{strains[1]:.1f} uE");self.l_s1.setText(f"{strains[0]:.1f} uE");self.l_s3.setText(f"{strains[2]:.1f} uE")
+            self.l_virt.setText(f"{v*1000:.3f} mm"); self.l_pos.setText(f"{p_mm:.2f} mm")
+
+    def auto_fill_def(self, item):
+        if item.column() == 1:
+            row, val = item.row(), float(self.l_virt.text().replace(" mm",""))
+            self.t_def.blockSignals(True); self.t_def.setItem(row, 2, QTableWidgetItem(f"{val:.3f}"))
+            m = float(item.text())
+            if m != 0: self.t_def.setItem(row, 3, QTableWidgetItem(f"{abs((val-m)/m)*100:.2f}%"))
+            self.t_def.blockSignals(False)
+
+    def auto_fill_lod(self, item):
+        if item.column() == 1:
+            row = item.row(); mass_kg = float(item.text()); ref_n = mass_kg * self.sm.GRAVITY
+            live_n = float(self.l_load.text().replace(" N",""))
+            self.t_lod.blockSignals(True); self.t_lod.setItem(row, 2, QTableWidgetItem(f"{ref_n:.2f}")); self.t_lod.setItem(row, 3, QTableWidgetItem(f"{live_n:.2f}"))
+            if ref_n != 0: self.t_lod.setItem(row, 4, QTableWidgetItem(f"{abs((live_n-ref_n)/ref_n)*100:.2f}%"))
+            self.t_lod.blockSignals(False)
+
+    def auto_fill_pos(self, item):
+        if item.column() == 1:
+            row, val = item.row(), float(self.l_pos.text().replace(" mm",""))
+            self.t_pos.blockSignals(True); self.t_pos.setItem(row, 2, QTableWidgetItem(f"{val:.2f}"))
+            m = float(item.text())
+            if m != 0: self.t_pos.setItem(row, 3, QTableWidgetItem(f"{abs((val-m)/m)*100:.2f}%"))
+            self.t_pos.blockSignals(False)
+
+    def clear_table(self, t):
+        t.blockSignals(True)
+        for i in range(5):
+            for j in range(1, t.columnCount()): t.setItem(i, j, QTableWidgetItem("0.0"))
+        t.blockSignals(False)
+
+    def log(self, msg): self.log_a.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
+
+
 #=========================================================================
-# MODULE 4: ROM INTERACTIVE VISUALIZER (OFFLINE SIMULATION)
+# MODULE 3: ROM INTERACTIVE VISUALIZER (OFFLINE SIMULATION)
 # =====================================================================
 class ROMVisualizerWindow(QMainWindow):
 
@@ -3024,7 +2472,7 @@ class ROMVisualizerWindow(QMainWindow):
 
     def __init__(self, dt_bank, geometry, launcher):
         super().__init__()
-        self.setWindowTitle("Module 4: ROM Interactive Visualizer")
+        self.setWindowTitle("Module 3: ROM Interactive Visualizer")
         self.setGeometry(150, 150, 1350, 900)
         
         self.DT_Bank = dt_bank
@@ -3167,6 +2615,20 @@ class ROMVisualizerWindow(QMainWindow):
         sec_ctrl_lay.addWidget(self.lbl_sec); sec_ctrl_lay.addWidget(self.SectionSlider)
         layout_2d.addLayout(sec_ctrl_lay)
         
+        # Create 2D orthographic viewer widgets
+        def wrap_canvas(interactor):
+            frame = QFrame(); frame.setStyleSheet("QFrame { border: 2px solid #7f8c8d; border-radius: 4px; background: white; }")
+            lay = QVBoxLayout(frame); lay.setContentsMargins(2,2,2,2); lay.addWidget(interactor); return frame
+
+        self.UIAxes_2D_Front = QtInteractor(); self.UIAxes_2D_Top = QtInteractor(); self.UIAxes_2D_Sec = QtInteractor()
+        grid_2d = QGridLayout(); grid_2d.setSpacing(10)
+        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Front), 0, 0, 2, 3) 
+        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Top), 2, 0, 1, 2)
+        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Sec), 2, 2, 1, 1)
+        layout_2d.addLayout(grid_2d)
+        
+        # ADD THE MISSING TAB TO THE TAB WIDGET
+        self.graphics_tabs.addTab(self.tab_2d, "2D Orthographic Views")
     
         # --- 4. Far Right: 1D Engineering Line Plots ---
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -3605,6 +3067,594 @@ class ROMVisualizerWindow(QMainWindow):
         if hasattr(self, 'launcher') and self.launcher:
             self.launcher.visualizer_window = None 
         event.accept()
+
+
+# =========================================================================
+# MODULE 4: LIVE DIGITAL TWIN WINDOW (REAL-TIME SENSOR FUSION)
+# =========================================================================
+class LiveDigitalTwinWindow(QMainWindow):
+    """Visualizes real-time sensor data mapped onto the ROM model with Ansys-style layouts."""
+    def __init__(self, sensor_manager, dt_bank, geometry, launcher):
+        super().__init__()
+        self.setWindowTitle("Module 4: Online Digital Twin Monitor")
+        self.setGeometry(100, 100, 1450, 950) # Made slightly wider to fit the top bar
+        
+        self.sm = sensor_manager
+        self.DT_Bank = dt_bank
+        self.geometry = geometry
+        self.launcher = launcher 
+        
+        self._is_rendering = False 
+        self.current_U = None
+        self.current_Sigma = None
+        self.Active_ROM = None
+
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.main_layout = QVBoxLayout(self.central_widget)
+
+        self.build_ui()
+        
+        # --- BACKGROUND THREAD SETUP ---
+        self.hw_worker = HardwareWorker(self.sm)
+        self.hw_worker.data_ready.connect(self.process_live_data)
+        self.hw_worker.error_occurred.connect(self.handle_thread_error)
+        
+    def build_ui(self):
+        # =================================================================
+        # 1. TOP PROFESSIONAL DASHBOARD (2-Row Grid Style)
+        # =================================================================
+        top_container = QWidget()
+        top_grid = QGridLayout(top_container)
+        top_grid.setContentsMargins(1, 1, 1, 1)
+        top_grid.setSpacing(5)
+
+        # --- Column 0: Header (Spans both rows) ---
+        self.header = ProfessionalTheme.create_header_widget("Monitor")
+        self.header.setFixedWidth(550)
+        top_grid.addWidget(self.header, 0, 0, 1, 0)
+
+        # --- ROW 0, COL 2: Live Predictions (Priority Space) ---
+        out_grp = QGroupBox("Live Predictions & Safety Status")
+        ProfessionalTheme.apply_professional_panel_style(out_grp)
+        out_lay = QHBoxLayout(out_grp)
+        out_lay.setContentsMargins(20, 12, 20, 12)
+        out_lay.setSpacing(5)
+        
+        self.predict_s1 = QLabel("P1: --")
+        self.predict_s2 = QLabel("P2: --")
+        self.predict_s3 = QLabel("P3: --")
+        self.lbl_fs_status = QLabel("FS STATUS: WAITING")
+        
+        style_val = f"font-weight: bold; color: {ProfessionalTheme.SUCCESS_GREEN}; background: {ProfessionalTheme.CONSOLE_BG}; padding: 10px; border-radius: 6px; min-width: 180px; font-size: 11pt; border: 1px solid #34495e;"
+        for lbl in [self.predict_s1, self.predict_s2, self.predict_s3]:
+            lbl.setStyleSheet(style_val)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            out_lay.addWidget(lbl)
+        
+        self.lbl_fs_status.setStyleSheet(f"font-weight: bold; color: white; background: {ProfessionalTheme.PRIMARY_BLUE}; padding: 10px; border-radius: 6px; min-width: 180px; font-size: 11pt; border: 2px solid {ProfessionalTheme.ACCENT_BLUE};")
+        self.lbl_fs_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        out_lay.addWidget(self.lbl_fs_status)
+        top_grid.addWidget(out_grp, 0, 2)
+        
+        # --- ROW 1, COL 1: Visualization Controls (Compact) ---
+        view_grp = QGroupBox("Visualization")
+        ProfessionalTheme.apply_professional_panel_style(view_grp)
+        view_lay = QHBoxLayout(view_grp)
+        view_lay.setContentsMargins(12, 8, 12, 8)
+        view_lay.setSpacing(5)
+
+        self.PrimaryModeCombo = QComboBox(); self.PrimaryModeCombo.addItems(["Failure", "Stress"])
+        self.PrimaryModeCombo.setFixedWidth(90)
+        self.PrimaryModeCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
+        
+        self.options_stack = QStackedWidget()
+        # Failure Settings
+        fail_container = QWidget(); fail_lay = QHBoxLayout(fail_container); fail_lay.setContentsMargins(0,0,0,0)
+        self.FailDisplayCombo = QComboBox(); self.FailDisplayCombo.addItems(["FS", "Intensity"])
+        self.FailDisplayCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
+        self.FailMethodCombo = QComboBox(); self.FailMethodCombo.addItems(["Von Mises", "Max Principal", "Max Shear"])
+        self.FailMethodCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
+        fail_lay.addWidget(self.FailDisplayCombo); fail_lay.addWidget(self.FailMethodCombo)
+        self.options_stack.addWidget(fail_container)
+        # Stress Settings
+        stress_container = QWidget(); stress_lay = QHBoxLayout(stress_container); stress_lay.setContentsMargins(0,0,0,0)
+        self.StressTypeCombo = QComboBox(); self.StressTypeCombo.addItems(["Sigma_xx", "Sigma_yy", "Sigma_zz", "Tau_xy", "Tau_yz", "Tau_zx"])
+        self.StressTypeCombo.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 5px; background: white;")
+        stress_lay.addWidget(self.StressTypeCombo); self.options_stack.addWidget(stress_container)
+
+        self.PrimaryModeCombo.currentIndexChanged.connect(self.options_stack.setCurrentIndex)
+        
+        view_lay.addWidget(self.PrimaryModeCombo); view_lay.addWidget(self.options_stack)
+        self.btn_reset_cam = QPushButton("🎥 Reset View")
+        self.btn_reset_cam.setFixedWidth(100)
+        self.btn_reset_cam.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.TEXT_GRAY, width=95))
+        view_lay.addWidget(self.btn_reset_cam)
+        
+        top_grid.addWidget(view_grp, 1, 1)
+
+        # --- ROW 1: Hardware Interface (SPACED & PROFESSIONAL) ---
+        in_grp = QGroupBox("Cyber-Physical Hardware Interface")
+        ProfessionalTheme.apply_professional_panel_style(in_grp)
+        in_lay = QHBoxLayout(in_grp)
+        in_lay.setContentsMargins(20, 12, 20, 12)
+        in_lay.setSpacing(12)
+        
+        # Zone 1: Buttons
+        self.btn_connect_hw = QPushButton("🔌 Connect")
+        self.btn_connect_hw.setFixedWidth(110)
+        self.btn_connect_hw.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=110))
+        
+        self.btn_go_live = QPushButton("▶ LIVE")
+        self.btn_go_live.setFixedWidth(95)
+        self.btn_go_live.setCheckable(True)
+        self.btn_go_live.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.SUCCESS_GREEN, width=95))
+        
+        in_lay.addWidget(self.btn_connect_hw)
+        in_lay.addWidget(self.btn_go_live)
+        
+        # Separator line
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setStyleSheet(f"color: {ProfessionalTheme.BORDER_LIGHT};")
+        in_lay.addWidget(separator)
+
+        
+
+        # Helper to create professional readout clusters
+        def add_readout(label_text, widget):
+            container = QVBoxLayout()
+            lbl = QLabel(f"{label_text}")
+            lbl.setStyleSheet(f"font-size: 8pt; color: {ProfessionalTheme.TEXT_GRAY}; font-weight: 500; text-align: center;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            widget.setFixedWidth(80)
+            widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            widget.setStyleSheet(f"background: {ProfessionalTheme.CONSOLE_BG}; color: #00ff00; font-weight: bold; font-size: 11pt; border: 1px solid {ProfessionalTheme.BORDER_COLOR}; border-radius: 4px; padding: 5px; font-family: 'Courier New';")
+            container.addWidget(lbl)
+            container.addWidget(widget)
+            in_lay.addLayout(container)
+
+        self.in_Load = QLineEdit("0.0")
+        self.in_S1 = QLineEdit("0")
+        self.in_S2 = QLineEdit("0")
+        self.in_S3 = QLineEdit("0")
+        self.in_Lposition = QLineEdit("0.0")
+
+        for w in [self.in_Load, self.in_S1, self.in_S2, self.in_S3, self.in_Lposition]:
+            w.setReadOnly(True)
+
+        # Adding readouts with structured spacing
+        add_readout("LOAD\n(N)", self.in_Load)
+        add_readout("SG-1\n(uE)", self.in_S1)
+        add_readout("SG-2\n(uE)", self.in_S2)
+        add_readout("SG-3\n(uE)", self.in_S3)
+        add_readout("POS\n(mm)", self.in_Lposition)
+
+        # Sensor probe location controls
+        probe_layout = QHBoxLayout()
+        probe_layout.setContentsMargins(0, 0, 0, 0)
+        probe_layout.setSpacing(10)
+
+        beam_len = self.geometry.get('Lx', 1.0)
+        self.pre_s1_loc = QLineEdit(f"{beam_len * 0.25:.2f}")
+        self.pre_s2_loc = QLineEdit(f"{beam_len * 0.50:.2f}")
+        self.pre_s3_loc = QLineEdit(f"{beam_len * 0.75:.2f}")
+
+        for widget in [self.pre_s1_loc, self.pre_s2_loc, self.pre_s3_loc]:
+            widget.setFixedWidth(70)
+            widget.setStyleSheet("border: 1px solid #bdc3c7; border-radius: 4px; padding: 4px;")
+
+        probe_layout.addWidget(QLabel("Probe X Locations (m):"))
+        probe_layout.addWidget(QLabel("SG1:"))
+        probe_layout.addWidget(self.pre_s1_loc)
+        probe_layout.addWidget(QLabel("SG2:"))
+        probe_layout.addWidget(self.pre_s2_loc)
+        probe_layout.addWidget(QLabel("SG3:"))
+        probe_layout.addWidget(self.pre_s3_loc)
+
+        in_lay.addLayout(probe_layout)
+        in_lay.addStretch()
+        
+        top_grid.addWidget(in_grp, 1, 2, 1, 1)  # Move to Row 1, Col 2 (top right)
+
+        # Set Column Stretching - balance space for more graphics area
+        top_grid.setColumnStretch(1, 3) # More space for future graphics expansion
+        top_grid.setColumnStretch(2, 2) # Hardware + Visualization compact area
+
+        self.main_layout.addWidget(top_container)
+
+        # =================================================================
+        # 2. MAIN CONTENT AREA (Graphics + Plots)
+        # =================================================================
+        content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.graphics_tabs = QTabWidget()
+
+        # Tab A: 3D View
+        self.tab_3d = QWidget(); layout_3d = QVBoxLayout(self.tab_3d)
+        self.UIAxes_3D = QtInteractor(); layout_3d.addWidget(self.UIAxes_3D)
+        self.graphics_tabs.addTab(self.tab_3d, "3D Isometric View")
+
+        # Tab B: 2D View (3 SUBPLOT STYLE)
+        self.tab_2d = QWidget(); layout_2d = QVBoxLayout(self.tab_2d)
+        sec_ctrl_lay = QHBoxLayout()
+        self.TopSliceCombo = QComboBox(); self.TopSliceCombo.addItems(["Top", "Axis", "Bottom"])
+        self.ViewSectionSlider = QSlider(Qt.Orientation.Horizontal); self.ViewSectionSlider.setRange(0, 100); self.ViewSectionSlider.setValue(50)
+        self.lbl_sec = QLabel(f"Section Cut (X): {self.geometry.get('Lx',1.0)/2:.2f} m")
+        sec_ctrl_lay.addWidget(QLabel("Slice:")); sec_ctrl_lay.addWidget(self.TopSliceCombo)
+        sec_ctrl_lay.addSpacing(20); sec_ctrl_lay.addWidget(self.lbl_sec); sec_ctrl_lay.addWidget(self.ViewSectionSlider)
+        layout_2d.addLayout(sec_ctrl_lay)
+
+        def wrap_canvas(interactor):
+            frame = QFrame(); frame.setStyleSheet("QFrame { border: 2px solid #7f8c8d; border-radius: 4px; background: white; }")
+            lay = QVBoxLayout(frame); lay.setContentsMargins(2,2,2,2); lay.addWidget(interactor); return frame
+
+        self.UIAxes_2D_Front = QtInteractor(); self.UIAxes_2D_Top = QtInteractor(); self.UIAxes_2D_Sec = QtInteractor()
+        grid_2d = QGridLayout(); grid_2d.setSpacing(10)
+        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Front), 0, 0, 2, 3) 
+        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Top), 2, 0, 1, 2)
+        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Sec), 2, 2, 1, 1)
+        layout_2d.addLayout(grid_2d)
+        self.graphics_tabs.addTab(self.tab_2d, "2D Orthographic Views")
+
+        content_splitter.addWidget(self.graphics_tabs)
+
+        # Right Side Plots
+        plots_grp = QGroupBox("Analysis Plots")
+        ProfessionalTheme.apply_professional_panel_style(plots_grp)
+        plots_lay = QVBoxLayout(plots_grp)
+        self.line_figure = Figure(figsize=(4, 6), tight_layout=True); self.line_canvas = FigureCanvas(self.line_figure)
+        plots_lay.addWidget(self.line_canvas); content_splitter.addWidget(plots_grp)
+        
+        # Increase graphics area: ratio 75% graphics, 25% plots
+        content_splitter.setSizes([1350, 450])
+        self.main_layout.addWidget(content_splitter, 1)
+
+        # --- SIGNAL CONNECTIONS ---
+        self.btn_connect_hw.clicked.connect(self.attempt_connect)
+        self.btn_go_live.toggled.connect(self.toggle_live_feed)
+        self.ViewSectionSlider.valueChanged.connect(self.on_section_change)
+        for w in [self.PrimaryModeCombo, self.FailDisplayCombo, self.FailMethodCombo, self.StressTypeCombo]:
+            w.currentTextChanged.connect(self.update_visuals_only)
+    # =================================================================
+    # UI LOGIC & HARDWARE THREADING
+    # =================================================================
+    def attempt_connect(self):
+        if self.launcher.calib_window: self.launcher.calib_window.handle_connect()
+        else:
+            if self.sm.connect(): QMessageBox.information(self, "Hardware", "Direct Connection Successful")
+            else: QMessageBox.warning(self, "Hardware Error", "Could not connect to Arduino.")
+
+    def toggle_live_feed(self, checked):
+        if checked:
+            self.btn_go_live.setText("⏹ STOP")
+            self.btn_go_live.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ERROR_RED, width=95))
+            self.hw_worker.start()
+        else:
+            self.btn_go_live.setText("▶ LIVE")
+            self.btn_go_live.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.SUCCESS_GREEN, width=95))
+            self.hw_worker.stop()
+
+    def handle_thread_error(self, err_msg):
+        print(f"Hardware Thread Error:\n{err_msg}")
+        self.btn_go_live.setChecked(False)
+
+    def switch_render_options(self, index):
+        self.options_stack.setCurrentIndex(index)
+        self.update_visuals_only()
+
+    def toggle_color_limits(self):
+        is_auto = self.AutoColorLimitSwitch.isChecked()
+        self.CMinEdit.setEnabled(not is_auto); self.CMaxEdit.setEnabled(not is_auto)
+        self.btn_apply_color.setEnabled(not is_auto)
+        self.update_visuals_only()
+
+    def on_section_change(self, val):
+        pos_m = (val / 100.0) * self.geometry['Lx']
+        self.lbl_sec.setText(f"<b>View Section Cut (X):</b> {pos_m:.2f} m")
+        if self.graphics_tabs.currentIndex() == 1: self.update_visuals_only()
+
+    def reset_camera_view(self):
+        if hasattr(self, 'UIAxes_3D'):
+            self.UIAxes_3D.view_isometric(); self.UIAxes_3D.reset_camera(); self.UIAxes_3D.render()
+        if hasattr(self, 'UIAxes_2D_Top'):
+            self.UIAxes_2D_Top.view_xy(negative=("Bottom" in self.TopSliceCombo.currentText()))
+            self.UIAxes_2D_Top.camera.parallel_projection = True
+            self.UIAxes_2D_Top.reset_camera(); self.UIAxes_2D_Top.render()
+        if hasattr(self, 'UIAxes_2D_Front'):
+            self.UIAxes_2D_Front.view_xz(); self.UIAxes_2D_Front.camera.parallel_projection = True
+            self.UIAxes_2D_Front.reset_camera(); self.UIAxes_2D_Front.render()
+        if hasattr(self, 'UIAxes_2D_Sec'):
+            self.UIAxes_2D_Sec.view_yz(); self.UIAxes_2D_Sec.camera.parallel_projection = True
+            self.UIAxes_2D_Sec.reset_camera(); self.UIAxes_2D_Sec.render()
+
+    # =================================================================
+    # REAL-TIME MATH (Triggered by Hardware Thread)
+    # =================================================================
+    def process_live_data(self, strains, force_n, p_mm):
+        if self._is_rendering: return 
+        self._is_rendering = True
+        
+        try:
+            # 1. Update Input Box Text
+            self.in_Load.setText(f"{force_n:.1f}")
+            self.in_S1.setText(f"{strains[0]:.1f}")
+            self.in_S2.setText(f"{strains[1]:.1f}")
+            self.in_S3.setText(f"{strains[2]:.1f}")
+            self.in_Lposition.setText(f"{p_mm:.1f}")
+
+            # 2. Logic & ROM Selection
+            strains_array = np.array(strains)
+            target = 'Fix' if (abs(strains[0]) > abs(strains[1]) or abs(strains[2]) > abs(strains[1])) else ('Simply' if np.argmax(np.abs(strains_array)) == 1 else 'Cant')
+            self.Active_ROM = next((r for r in self.DT_Bank if target.lower() in r['Label'].lower()), self.DT_Bank[0])
+
+            # 3. Inject Data to Offline Studio
+            self.launcher.offline_studio.node_coords = self.Active_ROM['Nodes']
+            self.launcher.offline_studio.element_type = self.Active_ROM['ElementType']
+            if 'Connectivity' in self.Active_ROM: self.launcher.offline_studio.element_connectivity = self.Active_ROM['Connectivity']
+            else:
+                self.hw_worker.stop(); self.btn_go_live.setChecked(False)
+                print("CRITICAL: ROM missing Connectivity. Re-save in Module 1.")
+                return
+
+            # 4. Math Projection
+            Lx = self.geometry['Lx']
+            load_pos_m = max(0, min(p_mm / 1000.0, Lx))
+            
+            temp_loads = self.launcher.offline_studio.define_loads_at_pos(load_pos_m, force_n)
+            num_nodes = self.Active_ROM['NumNodes']; F_temp = np.zeros(num_nodes * 3)
+            for j in range(len(temp_loads['point_nodes'])):
+                node_id = temp_loads['point_nodes'][j]; force_vec = temp_loads['point_load_values'][:, j]
+                F_temp[node_id*3 : node_id*3+3] += force_vec
+            
+            active_free_dofs = self.Active_ROM['bc_info']['free_dofs_indices']
+            F_red = F_temp[active_free_dofs]
+            alpha = np.linalg.solve(self.Active_ROM['K_rom'], self.Active_ROM['Phi'].T @ F_red)
+            
+            self.current_U = np.zeros(num_nodes * 3); self.current_U[active_free_dofs] = self.Active_ROM['Phi'] @ alpha
+            self.current_Sigma = (self.Active_ROM['Phi_stress'] @ alpha).reshape((num_nodes, 6))
+
+            # 5. Update Output Box (Predictions)
+            nodes = self.Active_ROM['Nodes']
+            loc_1= self.pre_s1_loc.text().strip()
+            loc_2= self.pre_s2_loc.text().strip()
+            loc_3= self.pre_s3_loc.text().strip()
+            # sensor is install at the lower fiber layer, so we look for nodes near the bottom (minz) at specified x locations
+            tol_x = Lx * 0.02  # 2% tolerance for x-coordinate matching
+            
+            # Parse user-input locations, use defaults if invalid
+            try: x_loc_1 = float(loc_1)
+            except: x_loc_1 = Lx * 0.25
+            try: x_loc_2 = float(loc_2)
+            except: x_loc_2 = Lx * 0.50
+            try: x_loc_3 = float(loc_3)
+            except: x_loc_3 = Lx * 0.75
+            
+            # Find nodes near x=x_loc_1 with minimum z (lower fiber layer)
+            mask_s1 = np.abs(nodes[:,0] - x_loc_1) < tol_x
+            idx_s1 = np.where(mask_s1)[0][np.argmin(nodes[mask_s1, 2])] if np.any(mask_s1) else np.argmin(np.abs(nodes[:,0] - x_loc_1))
+            
+            # Find nodes near x=x_loc_2 with minimum z (lower fiber layer)
+            mask_s2 = np.abs(nodes[:,0] - x_loc_2) < tol_x
+            idx_s2 = np.where(mask_s2)[0][np.argmin(nodes[mask_s2, 2])] if np.any(mask_s2) else np.argmin(np.abs(nodes[:,0] - x_loc_2))
+            
+            # Find nodes near x=x_loc_3 with minimum z (lower fiber layer)
+            mask_s3 = np.abs(nodes[:,0] - x_loc_3) < tol_x
+            idx_s3 = np.where(mask_s3)[0][np.argmin(nodes[mask_s3, 2])] if np.any(mask_s3) else np.argmin(np.abs(nodes[:,0] - x_loc_3))
+            
+            p1 = self.current_Sigma[idx_s1, 0] / self.launcher.offline_studio.material['E'] * 1e6
+            p2 = self.current_Sigma[idx_s2, 0] / self.launcher.offline_studio.material['E'] * 1e6
+            p3 = self.current_Sigma[idx_s3, 0] / self.launcher.offline_studio.material['E'] * 1e6
+            
+            e1 = abs(p1 - strains[0]) / max(abs(strains[0]), 1e-5) * 100
+            e2 = abs(p2 - strains[1]) / max(abs(strains[1]), 1e-5) * 100
+            e3 = abs(p3 - strains[2]) / max(abs(strains[2]), 1e-5) * 100
+            
+            self.predict_s1.setText(f"SG1 @ {x_loc_1:.2f} m: {p1:.1f} uE (Err: {e1:.1f}%)")
+            self.predict_s2.setText(f"SG2 @ {x_loc_2:.2f} m: {p2:.1f} uE (Err: {e2:.1f}%)")
+            self.predict_s3.setText(f"SG3 @ {x_loc_3:.2f} m: {p3:.1f} uE (Err: {e3:.1f}%)")
+            
+            try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
+            except: yield_strength = 250.0
+            
+            vm = np.sqrt(self.current_Sigma[:,0]**2 - self.current_Sigma[:,0]*self.current_Sigma[:,1] + self.current_Sigma[:,1]**2 + 3*self.current_Sigma[:,3]**2)
+            fs = yield_strength / max(np.max(vm)/1e6, 1e-9) 
+            
+            if fs < 1.0:
+                self.lbl_fs_status.setText("⚠️ FAILURE RISK ⚠️"); 
+                self.lbl_fs_status.setStyleSheet(f"font-size: 12pt; font-weight: bold; background: {ProfessionalTheme.ERROR_RED}; color: white; padding: 10px; border-radius: 6px; border: 2px solid #8B0000;")
+            else:
+                self.lbl_fs_status.setText(f"✓ FS: {fs:.2f} | SAFE"); 
+                self.lbl_fs_status.setStyleSheet(f"font-size: 12pt; font-weight: bold; background: {ProfessionalTheme.SUCCESS_GREEN}; color: white; padding: 10px; border-radius: 6px; border: 2px solid {ProfessionalTheme.HOVER_GREEN};")
+
+            self._update_graphics()
+
+        except Exception as e:
+            self.hw_worker.stop(); self.btn_go_live.setChecked(False)
+            print(traceback.format_exc())
+        finally:
+            self._is_rendering = False
+
+    # =================================================================
+    # GRAPHICS RENDERING ENGINE
+    # =================================================================
+    def update_visuals_only(self, *args):
+        if self.current_U is None: return
+        if self._is_rendering: return
+        self._is_rendering = True
+        try: self._update_graphics()
+        finally: self._is_rendering = False
+
+    def _update_graphics(self):
+        mode = self.PrimaryModeCombo.currentText()
+        try: sf = float(self.ScaleFactorEditField_2.text())
+        except: sf = 500.0 
+        try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
+        except: yield_strength = 250.0 
+
+        if self.AutoColorLimitSwitch.isChecked(): custom_clim = None
+        else:
+            try: c_min = float(self.CMinEdit.text())
+            except: c_min = -250.0
+            try: c_max = float(self.CMaxEdit.text())
+            except: c_max = 250.0
+            if c_min == c_max: c_max = c_min + 1e-6
+            custom_clim = [c_min, c_max]
+
+        if self.graphics_tabs.currentIndex() == 0:
+            if mode == "Stress": self.launcher.offline_studio.plot_stresses(self.current_Sigma, self.StressTypeCombo.currentText(), self.UIAxes_3D, self.current_U, sf, custom_clim=custom_clim)
+            else: self.launcher.offline_studio.plot_FS(self.FailMethodCombo.currentText(), yield_strength, self.UIAxes_3D, self.current_Sigma, self.current_U, sf, self.FailDisplayCombo.currentText(), custom_clim=custom_clim)
+            self.UIAxes_3D.add_text(f"Live Twin Active: {self.Active_ROM['Label']}", name="live_lbl", position='upper_right', color='red')
+            self.UIAxes_3D.update()
+
+        elif self.graphics_tabs.currentIndex() == 1:
+            self.render_2d_orthographic(custom_clim)
+
+        self.render_line_plots()
+
+    def get_plot_scalars(self):
+        mode = self.PrimaryModeCombo.currentText()
+        if mode == "Stress":
+            s_map = {'Sigma_xx': 0, 'Sigma_yy': 1, 'Sigma_zz': 2, 'Tau_xy': 3, 'Tau_yz': 4, 'Tau_zx': 5}
+            col = s_map.get(self.StressTypeCombo.currentText(), 0)
+            return self.current_Sigma[:, col] / 1e6, "jet", "Stress (MPa)"
+        else:
+            sx, sy, sz = self.current_Sigma[:, 0], self.current_Sigma[:, 1], self.current_Sigma[:, 2]
+            txy, tyz, tzx = self.current_Sigma[:, 3], self.current_Sigma[:, 4], self.current_Sigma[:, 5]
+            fail_mode = self.FailMethodCombo.currentText()
+            num_nodes = len(sx)
+            
+            if "von mises" in fail_mode.lower():
+                val = np.sqrt(0.5*((sx-sy)**2 + (sy-sz)**2 + (sz-sx)**2 + 6*(txy**2 + tyz**2 + tzx**2))) / 1e6
+            elif "principal" in fail_mode.lower() or "tresca" in fail_mode.lower() or "shear" in fail_mode.lower():
+                stress_tensors = np.zeros((num_nodes, 3, 3))
+                stress_tensors[:, 0, 0] = sx; stress_tensors[:, 0, 1] = txy; stress_tensors[:, 0, 2] = tzx
+                stress_tensors[:, 1, 0] = txy; stress_tensors[:, 1, 1] = sy;  stress_tensors[:, 1, 2] = tyz
+                stress_tensors[:, 2, 0] = tzx; stress_tensors[:, 2, 1] = tyz; stress_tensors[:, 2, 2] = sz
+                eigenvalues = np.linalg.eigvalsh(stress_tensors)
+                if "principal" in fail_mode.lower(): val = eigenvalues[:, 2] / 1e6
+                else: val = (eigenvalues[:, 2] - eigenvalues[:, 0]) / 2.0 / 1e6
+            else: val = np.sqrt(0.5*((sx-sy)**2 + (sy-sz)**2 + (sz-sx)**2 + 6*(txy**2 + tyz**2 + tzx**2))) / 1e6
+                
+            if self.FailDisplayCombo.currentText() == "Stress": return val, "jet", "Stress (MPa)"
+            else:
+                try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
+                except: yield_strength = 250.0 
+                return yield_strength / np.maximum(val, 1e-6), "jet_r", "Factor of Safety"
+
+    def render_2d_orthographic(self, custom_clim=None):
+        if self.current_U is None: return
+        scalars, cmap ,plot_name = self.get_plot_scalars()
+        try: sf = float(self.ScaleFactorEditField_2.text())
+        except: sf = 500.0
+
+        nodes = self.Active_ROM['Nodes']
+        U_nodes = self.current_U.reshape(-1, 3)
+        def_coords = nodes + (U_nodes * sf)
+
+        if custom_clim is not None:
+            c_limits = custom_clim
+        else:
+            s_min, s_max = np.min(scalars), np.max(scalars)
+            if s_min == s_max: s_max = s_min + 1e-6
+            c_limits = [s_min, s_max]
+            
+        sargs_horiz = dict(title_font_size=10, label_font_size=8, shadow=False, n_labels=3, fmt="%.1f", vertical=False, position_x=0.05, position_y=0.02, width=0.9, height=0.08)
+        sargs_vert = dict(title_font_size=10, label_font_size=8, shadow=False, n_labels=3, fmt="%.1f", vertical=True, position_x=0.88, position_y=0.05, width=0.08, height=0.85)
+
+        for ax in [self.UIAxes_2D_Top, self.UIAxes_2D_Front, self.UIAxes_2D_Sec]:
+            try: ax.clear_scalar_bars()
+            except:
+                for key in list(ax.scalar_bars.keys()): ax.remove_scalar_bar(key)
+
+        # 1. Top View (Static Undeformed)
+        z_max, z_min = np.max(nodes[:, 2]), np.min(nodes[:, 2])
+        top_choice = self.TopSliceCombo.currentText()
+        if "Top" in top_choice: target_z = z_max
+        elif "Bottom" in top_choice: target_z = z_min
+        else: target_z = (z_max + z_min) / 2.0
+        
+        idx_top = np.where(np.abs(nodes[:, 2] - target_z) < 1e-4)[0]
+        if len(idx_top) > 0:
+            surf_top = pv.PolyData(nodes[idx_top]).delaunay_2d()
+            surf_top[plot_name] = scalars[idx_top]
+            self.UIAxes_2D_Top.add_mesh(surf_top, name='top', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=0.5, scalar_bar_args=sargs_horiz, reset_camera=False)
+        else: self.UIAxes_2D_Top.add_mesh(pv.PolyData(), name='top', reset_camera=False)
+
+        self.UIAxes_2D_Top.add_text(f"Top View (XY) | Layer: {top_choice}", name='txt_top', font_size=10, color='black')
+        
+        cam_front = self.UIAxes_2D_Front.camera_position if hasattr(self, '_2d_cams_initialized') else None
+        if 'Hexa' in self.launcher.offline_studio.element_type: n_vis = 8; vtk_type = pv.CellType.HEXAHEDRON
+        else: n_vis = 4; vtk_type = pv.CellType.TETRA
+        cells_dict = {vtk_type: self.launcher.offline_studio.element_connectivity[:, :n_vis]}
+        grid_deformed = pv.UnstructuredGrid(cells_dict, def_coords)
+        grid_deformed.point_data[plot_name] = scalars
+
+        y_cut = (grid_deformed.bounds[2] + grid_deformed.bounds[3]) / 2.0 
+        try:
+            front_slice = grid_deformed.slice(normal='y', origin=(0, y_cut, 0))
+            self.UIAxes_2D_Front.add_mesh(front_slice, name='front', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=1.5, scalar_bar_args=sargs_vert, reset_camera=False)
+        except: self.UIAxes_2D_Front.add_mesh(pv.PolyData(), name='front', reset_camera=False)
+        self.UIAxes_2D_Front.add_text("Front View (XZ) | Deformed Axis Slice", name='txt_front', font_size=10, color='black')
+        if cam_front is not None: self.UIAxes_2D_Front.camera_position = cam_front
+
+        # 3. Section View (Static Undeformed)
+        cut_x = (self.SectionSlider.value() / 100.0) * self.geometry['Lx']
+        unique_x = np.unique(np.round(nodes[:, 0], decimals=4))
+        closest_x = unique_x[np.argmin(np.abs(unique_x - cut_x))]
+        idx_sec = np.where(np.abs(nodes[:, 0] - closest_x) < 1e-4)[0]
+        
+        if len(idx_sec) > 0:
+            pts_yz = nodes[idx_sec].copy(); pts_yz[:, 0] = 0 
+            surf_sec = pv.PolyData(pts_yz).delaunay_2d(); surf_sec.points[:, 0] = nodes[idx_sec, 0] 
+            surf_sec[plot_name] = scalars[idx_sec]
+            self.UIAxes_2D_Sec.add_mesh(surf_sec, name='section', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=0.5, scalar_bar_args=sargs_horiz, reset_camera=False)
+        else: self.UIAxes_2D_Sec.add_mesh(pv.PolyData(), name='section', reset_camera=False)
+        self.UIAxes_2D_Sec.add_text(f"Section Cut (YZ) | X={closest_x:.2f}m", name='txt_sec', font_size=10, color='black')
+
+        if not hasattr(self, '_2d_cams_initialized'):
+            self.UIAxes_2D_Top.view_xy(negative=("Bottom" in top_choice)); self.UIAxes_2D_Top.camera.parallel_projection = True
+            self.UIAxes_2D_Front.view_xz(); self.UIAxes_2D_Front.camera.parallel_projection = True
+            self.UIAxes_2D_Sec.view_yz(); self.UIAxes_2D_Sec.camera.parallel_projection = True
+            self.reset_camera_view()
+            self._2d_cams_initialized = True
+
+        self.UIAxes_2D_Top.render(); self.UIAxes_2D_Front.render(); self.UIAxes_2D_Sec.render()
+
+    def render_line_plots(self):
+        nodes = self.Active_ROM['Nodes']
+        y_top, y_bot = np.max(nodes[:, 1]), np.min(nodes[:, 1])
+        y_mid = (y_top + y_bot) / 2.0  
+        x_line = np.linspace(0, self.geometry['Lx'], 50)
+        
+        defl, s_top, s_bot, s_shear = [], [], [], []
+        for x in x_line:
+            idx_t = np.argmin(np.sqrt((nodes[:, 0]-x)**2 + (nodes[:, 1]-y_top)**2))
+            idx_b = np.argmin(np.sqrt((nodes[:, 0]-x)**2 + (nodes[:, 1]-y_bot)**2))
+            idx_m = np.argmin(np.sqrt((nodes[:, 0]-x)**2 + (nodes[:, 1]-y_mid)**2))
+            defl.append(self.current_U[idx_t * 3 + 1] * 1000) 
+            s_top.append(self.current_Sigma[idx_t, 0] / 1e6)              
+            s_bot.append(self.current_Sigma[idx_b, 0] / 1e6) 
+            s_shear.append(self.current_Sigma[idx_m, 3] / 1e6) 
+            
+        if not hasattr(self, '_line_initialized'):
+            self.line_figure.clear()
+            self.axL1 = self.line_figure.add_subplot(311); self.l_defl, = self.axL1.plot(x_line, defl, 'b', linewidth=2); self.axL1.set_title("Deflection (mm)"); self.axL1.grid(True)
+            self.axL2 = self.line_figure.add_subplot(312); self.l_top, = self.axL2.plot(x_line, s_top, 'r', label='Top Fiber'); self.l_bot, = self.axL2.plot(x_line, s_bot, 'g', label='Bottom Fiber'); self.axL2.set_title("Bending Stress (MPa)"); self.axL2.legend(); self.axL2.grid(True)
+            self.axL3 = self.line_figure.add_subplot(313); self.l_shear, = self.axL3.plot(x_line, s_shear, 'k', label='Neutral Axis'); self.axL3.set_title("Shear Stress (MPa)"); self.axL3.legend(); self.axL3.grid(True)
+            self.line_figure.tight_layout(); self._line_initialized = True
+        else:
+            self.l_defl.set_ydata(defl); self.l_top.set_ydata(s_top); self.l_bot.set_ydata(s_bot); self.l_shear.set_ydata(s_shear)
+            for ax in [self.axL1, self.axL2, self.axL3]: ax.relim(); ax.autoscale_view()
+        self.line_canvas.draw_idle()
+
+    def closeEvent(self, event):
+        if hasattr(self, 'hw_worker'): self.hw_worker.stop()
+        try: self.UIAxes_3D.close(); self.UIAxes_2D_Top.close(); self.UIAxes_2D_Front.close(); self.UIAxes_2D_Sec.close()
+        except: pass
+        if hasattr(self, 'launcher') and self.launcher: self.launcher.live_window = None 
+        event.accept()
+
+
 
 # =========================================================================
 # MODULE 5: WORKBENCH LAUNCHPAD (THE BRAIN)
