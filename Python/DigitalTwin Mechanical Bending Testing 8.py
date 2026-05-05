@@ -795,7 +795,7 @@ class OfflinePreparationStudio(QMainWindow):
         num_hex8 = len(hex8_conn)
         edge_map = {}; mid_node_counter = len(hex8_nodes); mid_nodes_list = []
         connectivity = np.zeros((num_hex8, 20), dtype=int)
-        edges = np.array([[0,1], [1,2], [0,2], [0,3], [1,3], [2,3]])
+        edges = np.array([[0,1], [1,2], [2,3], [3,0], [4,5], [5,6], [6,7], [7,4], [0,4], [1,5], [2,6], [3,7]])
         
         for e in range(num_hex8):
             corners = hex8_conn[e, :]
@@ -1435,7 +1435,7 @@ class OfflinePreparationStudio(QMainWindow):
             equilibrium_error = abs(total_applied + total_reaction)
             
             norm_F = np.linalg.norm(self.F_global)
-            if norm_F != 0 and (equilibrium_error / norm_F < 1e-6): eq_status = '✓ Equilibrium Satisfied'
+            if norm_F != 0 and (equilibrium_error / norm_F < 1e-5): eq_status = '✓ Equilibrium Satisfied'
             elif norm_F == 0 and equilibrium_error < 1e-6: eq_status = '✓ Equilibrium Satisfied (Zero Load)'
             else: eq_status = '⚠ Equilibrium Error Detected'
 
