@@ -543,7 +543,7 @@ class OfflinePreparationStudio(QMainWindow):
         vbox_pos.addWidget(self.LoadPositionSlider); top_layout.addLayout(vbox_pos)
         
         vbox_val = QVBoxLayout(); vbox_val.addWidget(QLabel("<b>Load Value (N):</b>"))
-        self.LoadValueNEditField = QLineEdit("-10000"); self.LoadValueNEditField.setFixedWidth(80)
+        self.LoadValueNEditField = QLineEdit("-10"); self.LoadValueNEditField.setFixedWidth(80)
         vbox_val.addWidget(self.LoadValueNEditField); top_layout.addLayout(vbox_val)
         
         vbox_apply = QVBoxLayout(); self.GravitationalForceSwitch = QCheckBox("Enable Gravity"); vbox_apply.addWidget(self.GravitationalForceSwitch)
