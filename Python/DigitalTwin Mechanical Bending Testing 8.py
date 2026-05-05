@@ -3222,9 +3222,9 @@ class LiveDigitalTwinWindow(QMainWindow):
 
         # Col 1 & 2: Probe Locations (Compact labels)
         style_label = "font-size: 8pt; font-weight: bold;"
-        l1 = QLabel("L1:m"); l1.setStyleSheet(style_label)
-        l2 = QLabel("L2:m"); l2.setStyleSheet(style_label)
-        l3 = QLabel("L3:m"); l3.setStyleSheet(style_label)
+        l1 = QLabel("L1:mm"); l1.setStyleSheet(style_label)
+        l2 = QLabel("L2:mm"); l2.setStyleSheet(style_label)
+        l3 = QLabel("L3:mm"); l3.setStyleSheet(style_label)
 
         pred_grid.addWidget(l1, 0, 1); pred_grid.addWidget(self.pre_s1_loc, 0, 2)
         pred_grid.addWidget(l2, 1, 1); pred_grid.addWidget(self.pre_s2_loc, 1, 2)
@@ -3396,9 +3396,9 @@ class LiveDigitalTwinWindow(QMainWindow):
 
             # 5. Update Output Box (Predictions)
             nodes = self.Active_ROM['Nodes']
-            loc_1= self.pre_s1_loc.text().strip()
-            loc_2= self.pre_s2_loc.text().strip()
-            loc_3= self.pre_s3_loc.text().strip()
+            loc_1= float(self.pre_s1_loc.text().strip())/1000.0
+            loc_2= float(self.pre_s2_loc.text().strip())/1000.0
+            loc_3= float(self.pre_s3_loc.text().strip())/1000.0
             # sensor is install at the lower fiber layer, so we look for nodes near the bottom (minz) at specified x locations
             tol_x = Lx * 0.02  # 2% tolerance for x-coordinate matching
             
