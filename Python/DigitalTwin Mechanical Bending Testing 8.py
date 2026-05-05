@@ -3102,118 +3102,148 @@ class LiveDigitalTwinWindow(QMainWindow):
         
     def build_ui(self):
         # =================================================================
-        # 1. TOP PROFESSIONAL DASHBOARD (2-Row Grid Style)
+        # 1. TOP DASHBOARD (3-Column Professional Layout)
         # =================================================================
         top_container = QWidget()
         top_grid = QGridLayout(top_container)
         top_grid.setContentsMargins(5, 5, 5, 5)
         top_grid.setSpacing(10)
 
-        # --- A. Header with Logo (Top Left, Spanning 2 Rows) ---
+        # --- COLUMN 0: Header with Logo (Spans both rows) ---
         self.header = ProfessionalTheme.create_header_widget("Monitor")
         self.header.setFixedWidth(240)
         top_grid.addWidget(self.header, 0, 0, 2, 1)
 
-        # --- B. Live Predictions & Safety (MODIFIED: ONE COLUMN, MULTI-ROW) ---
-        out_grp = QGroupBox("Live Predictions & Safety Status")
-        ProfessionalTheme.apply_professional_panel_style(out_grp)
-        # Vertical layout to stack P1, P2, P3, and FS in one column
-        out_lay = QVBoxLayout(out_grp) 
-        out_lay.setContentsMargins(10, 5, 10, 5)
-        out_lay.setSpacing(5)
-        
-        self.predict_s1 = QLabel("P1: --"); self.predict_s2 = QLabel("P2: --"); self.predict_s3 = QLabel("P3: --")
-        self.lbl_fs_status = QLabel("FS STATUS: WAITING")
-        
-        style_val = f"font-weight: bold; color: {ProfessionalTheme.SUCCESS_GREEN}; background: {ProfessionalTheme.CONSOLE_BG}; padding: 4px; border-radius: 4px; font-size: 10pt; border: 1px solid #34495e;"
-        for lbl in [self.predict_s1, self.predict_s2, self.predict_s3]:
-            lbl.setStyleSheet(style_val); lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            out_lay.addWidget(lbl) # Adds each P label to a new row
-        
-        self.lbl_fs_status.setStyleSheet("font-weight: bold; color: white; background: #2b5797; padding: 4px; border-radius: 4px; text-align: center;")
-        self.lbl_fs_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        out_lay.addWidget(self.lbl_fs_status)
-        
-        # Add Prediction box to Column 1 (Left of Visualization)
-        top_grid.addWidget(out_grp, 0, 1, 2, 1)
-
-        # --- C. Visualization Controls (Row 0, Col 2) ---
-        view_grp = QGroupBox("Visualization Controls")
+        # --- COLUMN 1, ROW 0: Visualization Control ---
+        view_grp = QGroupBox("Visualization Control")
         ProfessionalTheme.apply_professional_panel_style(view_grp)
         view_lay = QHBoxLayout(view_grp)
-        view_lay.setContentsMargins(10, 5, 10, 5)
-        view_lay.setSpacing(8)
-
-        self.PrimaryModeCombo = QComboBox(); self.PrimaryModeCombo.addItems(["Failure", "Stress"])
-        self.PrimaryModeCombo.setFixedWidth(80)
+        view_lay.setContentsMargins(10, 2, 10, 2)
         
+        self.PrimaryModeCombo = QComboBox(); self.PrimaryModeCombo.addItems(["Failure", "Stress"])
         self.options_stack = QStackedWidget()
-        fail_container = QWidget(); fail_lay = QHBoxLayout(fail_container); fail_lay.setContentsMargins(0,0,0,0)
-        self.FailDisplayCombo = QComboBox(); self.FailDisplayCombo.addItems(["FS", "Intensity"])
-        self.FailMethodCombo = QComboBox(); self.FailMethodCombo.addItems(["Von Mises", "Max Principal", "Max Shear"])
-        fail_lay.addWidget(self.FailDisplayCombo); fail_lay.addWidget(self.FailMethodCombo)
-        self.options_stack.addWidget(fail_container)
-
-        stress_container = QWidget(); stress_lay = QHBoxLayout(stress_container); stress_lay.setContentsMargins(0,0,0,0)
+        
+        fail_c = QWidget(); fail_l = QHBoxLayout(fail_c); fail_l.setContentsMargins(0,0,0,0)
+        self.FailDisplayCombo = QComboBox(); self.FailDisplayCombo.addItems(["FS", "Stress Intensity"])
+        self.FailMethodCombo = QComboBox(); self.FailMethodCombo.addItems(["Von Mises", "Max Principal", "Max Shear (Tresca)"])
+        fail_l.addWidget(self.FailDisplayCombo); fail_l.addWidget(self.FailMethodCombo)
+        self.options_stack.addWidget(fail_c)
+        
+        stress_c = QWidget(); stress_l = QHBoxLayout(stress_c); stress_l.setContentsMargins(0,0,0,0)
         self.StressTypeCombo = QComboBox(); self.StressTypeCombo.addItems(["Sigma_xx", "Sigma_yy", "Sigma_zz", "Tau_xy", "Tau_yz", "Tau_zx"])
-        stress_lay.addWidget(self.StressTypeCombo); self.options_stack.addWidget(stress_container)
+        stress_l.addWidget(self.StressTypeCombo); self.options_stack.addWidget(stress_c)
         self.PrimaryModeCombo.currentIndexChanged.connect(self.options_stack.setCurrentIndex)
 
-        view_lay.addWidget(QLabel("Mode:")); view_lay.addWidget(self.PrimaryModeCombo)
-        view_lay.addWidget(self.options_stack)
+        view_lay.addWidget(QLabel("Mode:")); view_lay.addWidget(self.PrimaryModeCombo); view_lay.addWidget(self.options_stack)
+        
         view_lay.addWidget(QLabel("Scale:")); self.ScaleFactorEditField_2 = QLineEdit("500"); self.ScaleFactorEditField_2.setFixedWidth(40)
         view_lay.addWidget(self.ScaleFactorEditField_2)
-
-        self.AutoColorLimitSwitch = QCheckBox("Auto"); self.AutoColorLimitSwitch.setChecked(True)
+        
+        self.AutoColorLimitSwitch = QCheckBox("Auto Color"); self.AutoColorLimitSwitch.setChecked(True)
+        view_lay.addWidget(self.AutoColorLimitSwitch)
         self.CMinEdit = QLineEdit("-250"); self.CMinEdit.setFixedWidth(40); self.CMinEdit.setEnabled(False)
         self.CMaxEdit = QLineEdit("250"); self.CMaxEdit.setFixedWidth(40); self.CMaxEdit.setEnabled(False)
-        self.btn_apply_color = QPushButton("✓"); self.btn_apply_color.setFixedWidth(25); self.btn_apply_color.setEnabled(False)
-        
-        view_lay.addWidget(self.AutoColorLimitSwitch)
-        view_lay.addWidget(QLabel("Min:")); view_lay.addWidget(self.CMinEdit)
-        view_lay.addWidget(QLabel("Max:")); view_lay.addWidget(self.CMaxEdit); view_lay.addWidget(self.btn_apply_color)
-        
-        self.btn_reset_cam = QPushButton("🎥"); self.btn_reset_cam.setFixedWidth(35)
-        view_lay.addWidget(self.btn_reset_cam)
-        
-        top_grid.addWidget(view_grp, 0, 2)
+        self.btn_apply_color = QPushButton("Apply"); self.btn_apply_color.setEnabled(False)
+        view_lay.addWidget(QLabel("Min:")); view_lay.addWidget(self.CMinEdit); view_lay.addWidget(QLabel("Max:")); view_lay.addWidget(self.CMaxEdit); view_lay.addWidget(self.btn_apply_color)
 
-        # --- D. Hardware Interface (Row 1, Col 2) ---
-        in_grp = QGroupBox("Cyber-Physical Hardware Interface")
+        self.btn_reset_cam = QPushButton("🎥 View"); self.btn_reset_cam.setFixedWidth(50)
+        view_lay.addWidget(self.btn_reset_cam)
+        top_grid.addWidget(view_grp, 0, 1)
+
+        # --- COLUMN 1, ROW 1: Cyber-Physics Interface (Includes Load, Pos, and SG1-SG3) ---
+        in_grp = QGroupBox("Cyber-Physics Interface")
         ProfessionalTheme.apply_professional_panel_style(in_grp)
         in_lay = QHBoxLayout(in_grp)
-        in_lay.setContentsMargins(15, 5, 15, 5)
+        in_lay.setContentsMargins(10, 2, 10, 2)
         
-        self.btn_connect_hw = QPushButton("🔌 Connect")
-        self.btn_go_live = QPushButton("▶ LIVE"); self.btn_go_live.setCheckable(True)
+        self.btn_connect_hw = QPushButton("Connect Hardware")
+        self.btn_go_live = QPushButton("GO LIVE"); self.btn_go_live.setCheckable(True)
         in_lay.addWidget(self.btn_connect_hw); in_lay.addWidget(self.btn_go_live)
-        in_lay.addSpacing(25)
         
-        def add_readout(label_text, widget):
-            container = QVBoxLayout(); container.setSpacing(1)
-            lbl = QLabel(f"<b>{label_text}</b>"); lbl.setStyleSheet("font-size: 8pt; color: #bdc3c7;"); lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            widget.setFixedWidth(65); widget.setAlignment(Qt.AlignmentFlag.AlignCenter); widget.setReadOnly(True)
-            widget.setStyleSheet(f"background: {ProfessionalTheme.CONSOLE_BG}; color: #f1c40f; font-weight: bold; border: 1px solid #34495e; border-radius: 3px;")
-            container.addWidget(lbl); container.addWidget(widget)
-            in_lay.addLayout(container); in_lay.addSpacing(15)
-
-        self.in_Load = QLineEdit("0.0"); self.in_S1 = QLineEdit("0"); self.in_S2 = QLineEdit("0")
-        self.in_S3 = QLineEdit("0"); self.load_pos_m = QLineEdit("0.0")
+        # Readout Elements
+        self.in_Load = QLineEdit("0.0"); self.load_pos_m = QLineEdit("0.0")
+        self.in_S1 = QLineEdit("0"); self.in_S2 = QLineEdit("0"); self.in_S3 = QLineEdit("0")
         
-        add_readout("LOAD (N)", self.in_Load); add_readout("SG-1 (uE)", self.in_S1)
-        add_readout("SG-2 (uE)", self.in_S2); add_readout("SG-3 (uE)", self.in_S3); add_readout("POS (mm)", self.load_pos_m)
+        for w in [self.in_Load, self.load_pos_m, self.in_S1, self.in_S2, self.in_S3]:
+            w.setReadOnly(True); w.setFixedWidth(45); w.setStyleSheet(f"background: {ProfessionalTheme.CONSOLE_BG}; color: yellow;")
         
-        in_lay.addSpacing(10); in_lay.addWidget(QLabel("<b>Probe X:</b>"))
-        self.pre_s1_loc = QLineEdit("0.12"); self.pre_s2_loc = QLineEdit("0.25"); self.pre_s3_loc = QLineEdit("0.37")
-        for le in [self.pre_s1_loc, self.pre_s2_loc, self.pre_s3_loc]:
-            le.setFixedWidth(45); le.setStyleSheet("border: 1px solid gray; border-radius: 2px;"); in_lay.addWidget(le)
+        in_lay.addWidget(QLabel("Load(N):")); in_lay.addWidget(self.in_Load)
+        in_lay.addWidget(QLabel("Pos(mm):")); in_lay.addWidget(self.load_pos_m)
+        in_lay.addWidget(QLabel("SG1(uE):")); in_lay.addWidget(self.in_S1)
+        in_lay.addWidget(QLabel("SG2(uE):")); in_lay.addWidget(self.in_S2)
+        in_lay.addWidget(QLabel("SG3(uE):")); in_lay.addWidget(self.in_S3)
 
         in_lay.addStretch()
-        top_grid.addWidget(in_grp, 1, 2)
+        top_grid.addWidget(in_grp, 1, 1)
 
-        # Set Column Stretching
-        top_grid.setColumnStretch(1, 1) # Prediction column (Narrower stack)
-        top_grid.setColumnStretch(2, 4) # Controls column (Wider)
+        # --- COLUMN 2: Live Predictions (Fixed-Width for Graphic Stability) ---
+        pred_grp = QGroupBox("Live Predictions")
+        ProfessionalTheme.apply_professional_panel_style(pred_grp)
+        pred_grid = QGridLayout(pred_grp)
+        pred_grid.setContentsMargins(8, 4, 8, 4)
+        pred_grid.setSpacing(6)
+
+        # 1. Prediction Labels (Fixed width to prevent dashboard jitter)
+        self.predict_s1 = QLabel("P1: --")
+        self.predict_s2 = QLabel("P2: --")
+        self.predict_s3 = QLabel("P3: --")
+        
+        p_style = f"font-weight: bold; color: {ProfessionalTheme.SUCCESS_GREEN}; background: {ProfessionalTheme.CONSOLE_BG}; padding: 4px; border-radius: 3px; border: 1px solid #34495e;"
+        for lbl in [self.predict_s1, self.predict_s2, self.predict_s3]:
+            lbl.setStyleSheet(p_style)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setFixedWidth(110) # Fixed width ensures numbers changing doesn't stretch the UI
+            lbl.setFixedHeight(28)
+
+        # 2. Probe Location Inputs
+        self.pre_s1_loc = QLineEdit("0.001")
+        self.pre_s2_loc = QLineEdit("0.25")
+        self.pre_s3_loc = QLineEdit("0.49")
+        
+        l_style = "border: 1px solid gray; border-radius: 2px; padding: 2px; background: white; font-weight: bold;"
+        for le in [self.pre_s1_loc, self.pre_s2_loc, self.pre_s3_loc]:
+            le.setFixedWidth(40)
+            le.setFixedHeight(22)
+            le.setStyleSheet(l_style)
+
+        # 3. FS Status (Compact Column)
+        self.lbl_fs_status = QLabel("FS: --")
+        # Reduced padding and min-width to make this column as small as possible
+        self.lbl_fs_status.setStyleSheet("font-weight: bold; color: white; background: #2b5797; padding: 2px; border-radius: 4px;")
+        self.lbl_fs_status.setFixedWidth(100) # Smallest readable width
+        self.lbl_fs_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_fs_status.setWordWrap(True) # Allows text to wrap if status is long
+
+        # 4. Grid Arrangement
+        # Col 0: Predictions
+        pred_grid.addWidget(self.predict_s1, 0, 0)
+        pred_grid.addWidget(self.predict_s2, 1, 0)
+        pred_grid.addWidget(self.predict_s3, 2, 0)
+
+        # Col 1 & 2: Probe Locations (Compact labels)
+        style_label = "font-size: 8pt; font-weight: bold;"
+        l1 = QLabel("L1:m"); l1.setStyleSheet(style_label)
+        l2 = QLabel("L2:m"); l2.setStyleSheet(style_label)
+        l3 = QLabel("L3:m"); l3.setStyleSheet(style_label)
+
+        pred_grid.addWidget(l1, 0, 1); pred_grid.addWidget(self.pre_s1_loc, 0, 2)
+        pred_grid.addWidget(l2, 1, 1); pred_grid.addWidget(self.pre_s2_loc, 1, 2)
+        pred_grid.addWidget(l3, 2, 1); pred_grid.addWidget(self.pre_s3_loc, 2, 2)
+
+        # Col 3: FS Status (Spans 3 rows, very narrow)
+        pred_grid.addWidget(self.lbl_fs_status, 0, 3, 3, 1)
+
+        # 5. Column Streching for Internal Grid
+        pred_grid.setColumnStretch(0, 0) # Lock size
+        pred_grid.setColumnStretch(1, 0) # Lock size
+        pred_grid.setColumnStretch(2, 0) # Lock size
+        pred_grid.setColumnStretch(3, 0) # Lock size: Makes FS column minimal
+
+        top_grid.addWidget(pred_grp, 0, 2, 2, 1)
+
+        # Dashboard Column Stretch
+        top_grid.setColumnStretch(1, 1) # Control column
+        top_grid.setColumnStretch(2, 0) # Prediction column stays at minimum size
         self.main_layout.addWidget(top_container)
 
         # =================================================================
@@ -3400,9 +3430,9 @@ class LiveDigitalTwinWindow(QMainWindow):
             e2 = abs(p2 - strains[1]) / max(abs(strains[1]), 1e-5) * 100
             e3 = abs(p3 - strains[2]) / max(abs(strains[2]), 1e-5) * 100
             
-            self.predict_s1.setText(f"{x_loc_1:.2f} m: {p1:.1f} uE (Err: {e1:.1f}%)")
-            self.predict_s2.setText(f"{x_loc_2:.2f} m: {p2:.1f} uE (Err: {e2:.1f}%)")
-            self.predict_s3.setText(f"{x_loc_3:.2f} m: {p3:.1f} uE (Err: {e3:.1f}%)")
+            self.predict_s1.setText(f" {p1:.1f} uE (Err:{e1:.1f}%)")
+            self.predict_s2.setText(f" {p2:.1f} uE (Err:{e2:.1f}%)")
+            self.predict_s3.setText(f" {p3:.1f} uE (Err:{e3:.1f}%)")
             
             try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
             except: yield_strength = 250.0
