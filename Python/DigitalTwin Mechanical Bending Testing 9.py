@@ -16,32 +16,31 @@ import time
 import vtk
 import numpy as np
 import scipy.sparse as sp
-from scipy.sparse.linalg import spsolve
+from scipy.sparse.linalg import spsolve                       
 import scipy.sparse.linalg as spla
-from scipy.integrate import cumulative_trapezoid
+from scipy.integrate import cumulative_trapezoid              
 import pyvista as pv
-from pyvistaqt import QtInteractor
+from pyvistaqt import QtInteractor                              
 import gc  # Added for memory management
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QFormLayout, QPushButton, QMessageBox, QInputDialog, QGridLayout, 
                              QTableWidgetItem, QLabel, QLineEdit, QComboBox, QTextEdit, 
                              QSlider, QCheckBox, QSplitter, QSizePolicy, QGroupBox, QTableWidget, 
-                             QStackedWidget, QListWidget, QFileDialog, QTabWidget, QFrame, QProgressDialog, QDialog, QProgressBar) # <--- Added QProgressDialog, QDialog, QProgressBar!
-from PyQt6.QtCore import Qt, QTime, QUrl ,QTimer
-from PyQt6.QtGui import QFont, QAction, QDesktopServices,QPixmap
+                             QStackedWidget, QListWidget, QFileDialog, QTabWidget, QFrame, QProgressDialog, QDialog, QProgressBar, QHeaderView) # <--- Added QProgressDialog, QDialog, QProgressBar!
+
+from PyQt6.QtCore import Qt, QTime, QUrl, QTimer
+from PyQt6.QtGui import QFont, QAction, QDesktopServices, QPixmap
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import pickle
 from datetime import datetime
 import traceback
 import serial
+import serial.tools.list_ports  # Auto-detect COM ports
 
 from PyQt6.QtCore import QThread, pyqtSignal
-import traceback
-import os
-import pickle
-import numpy as np
+
 
 # =========================================================================
 # PROFESSIONAL COLOR SCHEME & STYLING CONSTANTS
@@ -79,7 +78,7 @@ class ProfessionalTheme:
     SHADOW_COLOR = "rgba(0, 0, 0, 0.15)"
 
     @staticmethod
-    def create_header_widget(title_text, logo_path="CSE IMAGE.png"):
+    def create_header_widget(title_text, logo_path="CSE IMAGE.png"): # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         """
         Creates a professional header widget with logo and title.
         
@@ -121,7 +120,7 @@ class ProfessionalTheme:
         title_layout = QVBoxLayout()
         title_layout.setSpacing(4)
 
-        title_label = QLabel(title_text)
+        title_label = QLabel(title_text)                                # pyright: ignore[reportUnknownArgumentType]
         title_label.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         title_label.setStyleSheet(f"color: {ProfessionalTheme.TEXT_LIGHT};")
         title_layout.addWidget(title_label)
@@ -138,7 +137,7 @@ class ProfessionalTheme:
         return header_widget
 
     @staticmethod
-    def apply_professional_panel_style(widget):
+    def apply_professional_panel_style(widget):                        # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         """
         Applies professional panel styling to a group box.
         
@@ -166,7 +165,7 @@ class ProfessionalTheme:
             """)
 
     @staticmethod
-    def create_button_style(bg_color, text_color="white", hover_color=None, width=None):
+    def create_button_style(bg_color, text_color="white", hover_color=None, width=None): # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         """
         Factory method to create professional button styles.
         
@@ -181,10 +180,10 @@ class ProfessionalTheme:
         """
         if hover_color is None:
             # Auto-darken for hover effect
-            color_hex = bg_color.replace("#", "")
-            r = int(color_hex[0:2], 16)
-            g = int(color_hex[2:4], 16)
-            b = int(color_hex[4:6], 16)
+            color_hex = bg_color.replace("#", "")                           
+            r = int(color_hex[0:2], 16)                                     
+            g = int(color_hex[2:4], 16)                                     
+            b = int(color_hex[4:6], 16)                                    
             r, g, b = max(0, r - 20), max(0, g - 20), max(0, b - 20)
             hover_color = f"#{r:02x}{g:02x}{b:02x}"
 
@@ -225,9 +224,11 @@ class HardwareWorker(QThread):
     """
     finished = pyqtSignal()
     error = pyqtSignal(str)
+    error_occurred = pyqtSignal(str)
     progress = pyqtSignal(int)
+    data_ready = pyqtSignal(object, float, float)
 
-    def __init__(self, task_func, *args, **kwargs):
+    def __init__(self, task_func, *args, **kwargs): # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         """
         Initialize hardware worker.
         
@@ -238,60 +239,161 @@ class HardwareWorker(QThread):
         """
         super().__init__()
         self.task_func = task_func
-        self.args = args
-        self.kwargs = kwargs
+        self.args = args                       # pyright: ignore[reportUnknownMemberType]
+        self.kwargs = kwargs                   # pyright: ignore[reportUnknownMemberType]
+        self._running = False
 
     def run(self):
         """Execute the task in background thread."""
         try:
-            self.task_func(*self.args, **self.kwargs)
-            self.finished.emit()
+            self._running = True
+            if callable(self.task_func):
+                self.task_func(*self.args, **self.kwargs) # type: ignore
+                self.finished.emit()
+                return
+
+            sm = self.task_func
+            while self._running:
+                raw = sm.get_average_raw(1)
+                if raw is not None:
+                    if sm.load_calib_factor == 0 or not np.isfinite(sm.load_calib_factor):
+                        self.error_occurred.emit("Invalid load calibration factor. Tare with no load, then calibrate with a known mass.")
+                        self.msleep(250)
+                        continue
+                        
+                    # 1. Load calculation
+                    force_n = ((raw[3] - sm.load_tare) / sm.load_calib_factor) * sm.GRAVITY + sm.load_offset_n
+                    
+                    # 2. Strain calculations
+                    strains = [sm.calc_microstrain(raw[i], sm.strain_tare_bits[i], sm.strain_af[i]) for i in range(3)]
+                    
+                    # 3.TOF Position calculation using calibrated TOF values from Module 2
+                    
+                    try:
+                        tof_offset = float(sm.TOF_offset_mm)
+                    except (AttributeError, ValueError):
+                        tof_offset = 0.0
+                        
+                    p_mm = raw[4] + tof_offset  # Uses calibration output
+                    
+                    # Send updated data back to live view
+                    self.data_ready.emit(strains, float(force_n), float(p_mm))
+                    
+                self.msleep(50)
         except Exception as e:
             self.error.emit(str(e))
+            self.error_occurred.emit(str(e))
             traceback.print_exc()
+
+    def stop(self):
+        """Stop the worker loop and wait briefly for the thread to exit."""
+        self._running = False
+        if self.isRunning():
+            self.wait(1000)
 
 # =========================================================================
 # . HARDWARE LAYER
 # =========================================================================
-class SensorManager:
-    """Handles hardware communication and raw-to-physical conversion."""
-    def __init__(self, port='COM4', baud=115200):
-        self.port, self.baud, self.ser = port, baud, None
-        self.is_connected = False
-        self.GRAVITY, self.V_REF, self.GF, self.V_IN = 9.80665, 5.0, 2.0, 5.0
-        self.load_tare, self.load_calib_factor, self.strain_zero_bits = 0.0, 1.0, 0.0
-        self.amp_gain, self.ultra_tare_duration = 100.0, 0.0
+import serial.tools.list_ports  # Auto-detect COM ports
 
-    def connect(self):
+class SensorManager:
+    """Handles hardware communication and physical constants."""
+    def __init__(self, port='COM5', baud=115200):  # Removed hardcoded COM3
+        self.baud = baud
+        self.port = port
+        self.ser = None
+        self.is_connected = False
+        
+        # --- HX711 & Bridge Constants ---
+        self.GRAVITY = 9.80665
+        self.V_REF = 4.85
+        self.V_IN = self.V_REF
+        self.GF = 2.0
+        self.GAIN = 64.0        
+        self.ADC_MAX = 16777216.0 
+        
+        # --- Beam Physical Properties (AL6061) ---
+        self.E_GPa = 69.0       
+        self.L_m = 0.514          
+        self.b_m = 0.015        
+        self.h_m = 0.003        
+        
+        # Compute Structural Stiffness (EI)
+        self.I_m4 = (self.b_m * self.h_m**3) / 12.0
+        self.EI = (self.E_GPa * 1e9) * self.I_m4
+        
+        # --- Sensor Tracking Arrays ---
+        self.load_tare = 0.0
+        self.load_calib_factor = 1.0
+        self.load_offset_n = 0.0
+        self.ultra_tare = 0.0
+        self.ultra_tare_pos = 0.0  # Ultrasonic tare position (mm)
+        self.ultra_offset_mm = 0.0
+        self.sound_speed_mps = 343.0
+        
+        # [Ch1 (Left), Ch2 (Mid), Ch3 (Right)]
+        self.strain_tare_bits = np.array([0.0, 0.0, 0.0])
+        self.strain_af = np.array([2.0, 2.0, 2.0]) 
+        self.strain_zero_bits = 0.0
+        self.amp_gain = 100.0
+        
+        self.live_raw = [0, 0, 0, 0, 0]
+
+    def connect(self, port=None):
+        """Connects to the dynamically passed COM port."""
+        if port is not None:
+            self.port = port
+        if not self.port:
+            print("Connection error: no serial port selected.")
+            return False
         try:
             self.ser = serial.Serial(self.port, self.baud, timeout=0.1)
             time.sleep(2)
             self.is_connected = True
             return True
-        except: return False
+        except Exception as e: 
+            print(f"Connection error: {e}")
+            return False
 
     def disconnect(self):
+        """Safely disconnect from serial port."""
         if self.ser and self.ser.is_open:
             self.ser.close()
         self.is_connected = False
 
-    def get_average_raw(self, samples=10, timeout_sec=1.5):
+    def get_average_raw(self, samples=10, timeout_sec=2.0):
+        """Get averaged raw sensor readings."""
         collected = []
         if not self.is_connected: return None
         self.ser.reset_input_buffer()
         start_time = time.time()
         while len(collected) < samples:
-            if (time.time() - start_time) > timeout_sec: break 
+            if (time.time() - start_time) > timeout_sec:
+                break
             if self.ser.in_waiting > 0:
+                line = self.ser.readline().decode('utf-8', errors='ignore').strip()
                 try:
-                    line = self.ser.readline().decode('utf-8').strip()
                     vals = [float(x) for x in line.split(',')]
                     if len(vals) == 5: collected.append(vals)
                 except: continue
             else:
                 time.sleep(0.01)
-        return np.mean(collected, axis=0) if collected else None
+        
+        if collected:
+            self.live_raw = np.mean(collected, axis=0)
+            return self.live_raw
+        return None
 
+    def compute_af(self, raw_bits):
+        """Compute Asymmetric Factor from raw ADC bits."""
+        v_offset_ratio = raw_bits / (self.ADC_MAX * self.GAIN)
+        return 1.0 / (v_offset_ratio + 0.5)
+
+    def calc_microstrain(self, raw_bits, tare_bits, af):
+        """Calculate microstrain from raw ADC with tare reference and AF."""
+        delta_bits = raw_bits - tare_bits
+        v_ratio = delta_bits / (self.ADC_MAX * self.GAIN)
+        return (2.0 * af * v_ratio * 1e6) / self.GF
 
 
 # =========================================================================
@@ -303,6 +405,8 @@ class WorkbenchLaunchpad(QMainWindow):
     def closeEvent(self, event):
         self.log_msg("Initiating System Shutdown...")
         if hasattr(self, 'offline_studio') and self.offline_studio: self.offline_studio.close()
+        if hasattr(self, 'sm'): self.sm.disconnect()
+        event.accept()
         if hasattr(self, 'visualizer_window') and self.visualizer_window: self.visualizer_window.close()
         if hasattr(self, 'calib_window') and self.calib_window: self.calib_window.close()
         if hasattr(self, 'live_window') and self.live_window: self.live_window.close()
@@ -318,7 +422,7 @@ class WorkbenchLaunchpad(QMainWindow):
         # Show splash screen with loading bar
         self.show_splash_screen()
         
-        self.sm = SensorManager(port='COM4', baud=115200)
+        self.sm = SensorManager(port='COM5', baud=115200)
         self.offline_studio = OfflinePreparationStudio() 
         self.visualizer_window = None 
         self.calib_window = None
@@ -379,10 +483,13 @@ class WorkbenchLaunchpad(QMainWindow):
         layout.setContentsMargins(30, 20, 30, 30)
         
         # --- NEW: Logo Image ---
-        logo_img = QLabel()
-        logo_pix = QPixmap("CSE IMAGE.png")
+        logo_img=QLabel()
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        logo_path = os.path.join(base_dir, "CSE IMAGE.png")
+        logo_pix = QPixmap(logo_path)
         if not logo_pix.isNull():
             logo_img.setPixmap(logo_pix.scaled(400, 150, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            logo_img.setPixmap(logo_pix.scaled(400, 150, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)) # type: ignore
             logo_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(logo_img)
         
@@ -453,12 +560,15 @@ class WorkbenchLaunchpad(QMainWindow):
         
         # --- App Logo at top of Sidebar ---
         side_logo = QLabel()
-        side_pix = QPixmap("CSE IMAGE.png")
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        logo_path = os.path.join(base_dir, "CSE IMAGE.png")
+        side_pix = QPixmap(logo_path)
         if not side_pix.isNull():
             logo_frame = QFrame()
             logo_frame.setStyleSheet(f"background-color: white; border: 2px solid {ProfessionalTheme.ACCENT_BLUE}; border-radius: 8px; padding: 5px;")
             logo_frame_layout = QVBoxLayout(logo_frame)
             side_logo.setPixmap(side_pix.scaled(200, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            side_logo.setPixmap(side_pix.scaled(200, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)) # type: ignore
             side_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
             logo_frame_layout.addWidget(side_logo)
             sidebar_layout.addWidget(logo_frame)
@@ -639,7 +749,7 @@ class WorkbenchLaunchpad(QMainWindow):
         self.main_v_splitter = QSplitter(Qt.Orientation.Vertical)
         self.main_v_splitter.addWidget(self.top_splitter)
         self.main_v_splitter.addWidget(console_grp)
-        self.main_v_splitter.setSizes([500, 150]) # Console takes up bottom area
+        self.main_v_splitter.setSizes([500, 150])               # Console takes up bottom area
 
         self.main_layout.addWidget(self.main_v_splitter)
         self.update_system_status()
@@ -672,6 +782,7 @@ class WorkbenchLaunchpad(QMainWindow):
             self.lbl_hw_status.setStyleSheet("color: red;")
 
     def manual_load_rom(self):
+        """Allow user to manually load ROM bank from file."""
         from PyQt6.QtWidgets import QFileDialog
         import pickle
         file_name, _ = QFileDialog.getOpenFileName(self, "Open ROM Bank File", "", "Pickle Files (*.pkl)")
@@ -680,9 +791,12 @@ class WorkbenchLaunchpad(QMainWindow):
                 with open(file_name, 'rb') as f: 
                     self.offline_studio.DT_Bank = pickle.load(f)
                 self.log_msg(f"SUCCESS: Loaded ROM Bank from {file_name.split('/')[-1]}")
+                file_basename = os.path.basename(file_name)
+                self.log_msg(f"SUCCESS: Loaded ROM Bank from {file_basename}")
                 self.update_system_status()
             except Exception as e:
                 self.log_msg(f"ERROR: Failed to load ROM - {str(e)}")
+                traceback.print_exc()
 
     # --- MODULE LAUNCHERS ---
     def launch_offline_studio(self):
@@ -738,6 +852,9 @@ class WorkbenchLaunchpad(QMainWindow):
             self.log_msg("📘 Opened Student Lab Manual.")
         else:
             QMessageBox.warning(self, "File Not Found", f"Could not find the file:\n{pdf_path}\n\nPlease ensure the PDF is in the same folder as the software.")
+            error_msg = (f"Could not find the file:\n{pdf_path}\n\n"
+                        "Please ensure the PDF is in the same folder as the software.")
+            QMessageBox.warning(self, "File Not Found", error_msg)
             self.log_msg("ERROR: Student Manual PDF not found.")
 
     def open_instructor_manual(self):
@@ -748,6 +865,9 @@ class WorkbenchLaunchpad(QMainWindow):
             self.log_msg("📙 Opened Instructor Manual.")
         else:
             QMessageBox.warning(self, "File Not Found", f"Could not find the file:\n{pdf_path}\n\nPlease ensure the PDF is in the same folder as the software.")
+            error_msg = (f"Could not find the file:\n{pdf_path}\n\n"
+                        "Please ensure the PDF is in the same folder as the software.")
+            QMessageBox.warning(self, "File Not Found", error_msg)
             self.log_msg("ERROR: Instructor Manual PDF not found.")    
 
 
@@ -773,8 +893,8 @@ class OfflinePreparationStudio(QMainWindow):
         self.setWindowTitle("Module 1: FEM / ROM Offline Studio")
         self.setGeometry(100, 100, 1400, 900)
         
-        self.geometry = {'Lx': 0.64, 'Ly': 0.015, 'Lz': 0.003}
-        self.material = {'E': 68e9, 'nu': 0.3, 'rho': 7850}
+        self.geometry = {'Lx': 0.5, 'Ly': 0.015, 'Lz': 0.003}
+        self.material = {'E': 68e9, 'nu': 0.33, 'rho': 7850}
         self.mesh_params = {'nx': 50, 'ny': 10, 'nz': 10}
         self.settings = {'Integration': 'Full'}
         self.element_type = 'Hexa8'
@@ -891,6 +1011,22 @@ class OfflinePreparationStudio(QMainWindow):
         self.stacked_widget.addWidget(self.create_panel6_rom_training())
         self.stacked_widget.addWidget(self.create_panel7_rom_validation())
 
+    @staticmethod
+    def m_to_mm(value_m):
+        return value_m * 1000.0
+
+    @staticmethod
+    def mm_to_m(value_mm):
+        return value_mm / 1000.0
+
+    @staticmethod
+    def pa_to_mpa(value_pa):
+        return value_pa / 1e6
+
+    @staticmethod
+    def mpa_to_pa(value_mpa):
+        return value_mpa * 1e6
+
     def lock_ui(self):
         self.central_widget.setEnabled(False)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -976,14 +1112,14 @@ class OfflinePreparationStudio(QMainWindow):
         panel = QWidget(); layout = QHBoxLayout(panel)
         left = QWidget(); form = QFormLayout(left)
         
-        self.LmEditField = QLineEdit(str(self.geometry['Lx'])); form.addRow("L(m):", self.LmEditField)
-        self.wmEditField = QLineEdit(str(self.geometry['Ly'])); form.addRow("w(m):", self.wmEditField)
-        self.HmEditField = QLineEdit(str(self.geometry['Lz'])); form.addRow("H(m):", self.HmEditField)
+        self.LmEditField = QLineEdit(f"{self.m_to_mm(self.geometry['Lx']):g}"); form.addRow("L (mm):", self.LmEditField)
+        self.wmEditField = QLineEdit(f"{self.m_to_mm(self.geometry['Ly']):g}"); form.addRow("w (mm):", self.wmEditField)
+        self.HmEditField = QLineEdit(f"{self.m_to_mm(self.geometry['Lz']):g}"); form.addRow("H (mm):", self.HmEditField)
         
         btn_vis = QPushButton("Visualize Geometry"); btn_vis.clicked.connect(self.VasulizeGeometryButtonPushed)
         form.addRow(btn_vis)
 
-        self.EPaEditField = QLineEdit(str(self.material['E'])); form.addRow("E (Pa):", self.EPaEditField)
+        self.EPaEditField = QLineEdit(f"{self.pa_to_mpa(self.material['E']):g}"); form.addRow("E (MPa):", self.EPaEditField)
         self.NuEditField = QLineEdit(str(self.material['nu'])); form.addRow("Nu:", self.NuEditField)
         self.rhokgm3EditField = QLineEdit(str(self.material['rho'])); form.addRow("rho (kg/m^3):", self.rhokgm3EditField)
 
@@ -1030,14 +1166,14 @@ class OfflinePreparationStudio(QMainWindow):
         vbox_pos = QVBoxLayout()
         beam_len = self.geometry.get('Lx', 1.0) if hasattr(self, 'geometry') else 1.0
         start_pos = (50 / 100.0) * beam_len
-        self.lbl_load_pos = QLabel(f"<b>Load Position:</b><br><span style='color:blue;'>{start_pos:.2f} m</span>")
+        self.lbl_load_pos = QLabel(f"<b>Load Position:</b><br><span style='color:blue;'>{self.m_to_mm(start_pos):.1f} mm</span>")
         vbox_pos.addWidget(self.lbl_load_pos)
         
         self.LoadPositionSlider = QSlider(Qt.Orientation.Horizontal)
         self.LoadPositionSlider.setMinimum(0); self.LoadPositionSlider.setMaximum(100); self.LoadPositionSlider.setValue(50)
         self.LoadPositionSlider.setMinimumWidth(200); self.LoadPositionSlider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.LoadPositionSlider.valueChanged.connect(
-            lambda v: self.lbl_load_pos.setText(f"<b>Load Position:</b><br><span style='color:blue;'>{(v/100.0) * (self.geometry.get('Lx', 1.0) if hasattr(self, 'geometry') else 1.0):.2f} m</span>")
+            lambda v: self.lbl_load_pos.setText(f"<b>Load Position:</b><br><span style='color:blue;'>{self.m_to_mm((v/100.0) * (self.geometry.get('Lx', 1.0) if hasattr(self, 'geometry') else 1.0)):.1f} mm</span>")
         )
         vbox_pos.addWidget(self.LoadPositionSlider); top_layout.addLayout(vbox_pos)
         
@@ -1130,7 +1266,7 @@ class OfflinePreparationStudio(QMainWindow):
         top_layout.addWidget(QLabel("<b>Failure Method:</b>")); self.MethodDropDown = QComboBox(); self.MethodDropDown.addItems(["Von Mises", "Max Principal", "Max Shear (Tresca)"]); top_layout.addWidget(self.MethodDropDown)
         top_layout.addWidget(QLabel("<b>Display:</b>")); self.DisplayChoiceDropDown = QComboBox(); self.DisplayChoiceDropDown.addItems(["FS", "Stress"]); top_layout.addWidget(self.DisplayChoiceDropDown)
         top_layout.addWidget(QLabel("<b>Yield (MPa):</b>")); self.YieldStrengthMpaEditField = QLineEdit("250"); self.YieldStrengthMpaEditField.setFixedWidth(60); top_layout.addWidget(self.YieldStrengthMpaEditField)
-        top_layout.addWidget(QLabel("<b>Scale:</b>")); self.ScaleFactorEditField = QLineEdit("500"); self.ScaleFactorEditField.setFixedWidth(60); top_layout.addWidget(self.ScaleFactorEditField)
+        top_layout.addWidget(QLabel("<b>Scale:</b>")); self.ScaleFactorEditField = QLineEdit("5"); self.ScaleFactorEditField.setFixedWidth(60); top_layout.addWidget(self.ScaleFactorEditField)
         top_layout.addSpacing(20)
         
         btn_plot = QPushButton("Open PostProcessing")
@@ -1193,13 +1329,13 @@ class OfflinePreparationStudio(QMainWindow):
         self.ValidationLoadPositionSlider = QSlider(Qt.Orientation.Horizontal)
         self.ValidationLoadPositionSlider.setMinimum(0); self.ValidationLoadPositionSlider.setMaximum(100); self.ValidationLoadPositionSlider.setValue(50) 
         start_pos = (50 / 100.0) * self.geometry['Lx']
-        self.lbl_load_pos_val = QLabel(f"<b>Load Position:</b><br><span style='color:blue;'>{start_pos:.2f} m</span>")
+        self.lbl_load_pos_val = QLabel(f"<b>Load Position:</b><br><span style='color:blue;'>{self.m_to_mm(start_pos):.1f} mm</span>")
         self.ValidationLoadPositionSlider.valueChanged.connect(
-            lambda v: self.lbl_load_pos_val.setText(f"<b>Load Position:</b><br><span style='color:blue;'>{(v/100.0) * self.geometry['Lx']:.2f} m</span>")
+            lambda v: self.lbl_load_pos_val.setText(f"<b>Load Position:</b><br><span style='color:blue;'>{self.m_to_mm((v/100.0) * self.geometry['Lx']):.1f} mm</span>")
         )
         form.addRow(self.lbl_load_pos_val, self.ValidationLoadPositionSlider)
 
-        self.ValidationLoadNEditField = QLineEdit("-10000"); form.addRow("Validation Load (N):", self.ValidationLoadNEditField)
+        self.ValidationLoadNEditField = QLineEdit("-10"); form.addRow("Validation Load (N):", self.ValidationLoadNEditField)
         self.TypeofStressesDropDown_2 = QComboBox(); self.TypeofStressesDropDown_2.addItems(['Sigma_xx', 'Sigma_yy', 'Sigma_zz', 'Tau_xy', 'Tau_yz', 'Tau_zx'])
         form.addRow("Type of Stresses:", self.TypeofStressesDropDown_2)
 
@@ -1228,9 +1364,19 @@ class OfflinePreparationStudio(QMainWindow):
 
 
         right = QSplitter(Qt.Orientation.Horizontal)
-        self.UIAxes9 = QtInteractor(right); right.addWidget(self.UIAxes9) 
-        self.UIAxes10 = QtInteractor(right); right.addWidget(self.UIAxes10)
+        fem_widget = QWidget()
+        fem_layout = QVBoxLayout(fem_widget)
+        label_fem = QLabel("<b>FEM </b>"); label_fem.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.UIAxes9 = QtInteractor(fem_widget)
+        fem_layout.addWidget(label_fem); fem_layout.addWidget(self.UIAxes9)
+        right.addWidget(fem_widget)
         
+        rom_widget = QWidget()
+        rom_layout = QVBoxLayout(rom_widget)
+        label_rom = QLabel("<b>ROM </b>"); label_rom.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.UIAxes10 = QtInteractor(rom_widget)
+        rom_layout.addWidget(label_rom); rom_layout.addWidget(self.UIAxes10)
+        right.addWidget(rom_widget)
         layout.addWidget(left, 1); layout.addWidget(right, 3)
         return panel
 
@@ -1243,9 +1389,17 @@ class OfflinePreparationStudio(QMainWindow):
     # MATH BACKEND: GEOMETRY, MESHING, ASSEMBLY
     # =========================================================================
     def VasulizeGeometryButtonPushed(self):
-        L, W, H = float(self.LmEditField.text()), float(self.wmEditField.text()), float(self.HmEditField.text())
+        L = self.mm_to_m(float(self.LmEditField.text()))
+        W = self.mm_to_m(float(self.wmEditField.text()))
+        H = self.mm_to_m(float(self.HmEditField.text()))
         if L <= 0 or W <= 0 or H <= 0: return
         self.geometry = {'Lx': L, 'Ly': W, 'Lz': H}
+        if hasattr(self, 'lbl_load_pos'):
+            pos_m = (self.LoadPositionSlider.value() / 100.0) * self.geometry['Lx']
+            self.lbl_load_pos.setText(f"<b>Load Position:</b><br><span style='color:blue;'>{self.m_to_mm(pos_m):.1f} mm</span>")
+        if hasattr(self, 'lbl_load_pos_val'):
+            pos_m = (self.ValidationLoadPositionSlider.value() / 100.0) * self.geometry['Lx']
+            self.lbl_load_pos_val.setText(f"<b>Load Position:</b><br><span style='color:blue;'>{self.m_to_mm(pos_m):.1f} mm</span>")
         
         box = pv.Box(bounds=(0, L, 0, W, 0, H))
         self.UIAxes.add_mesh(box, name='geom_box', color="lightblue", show_edges=True, opacity=0.4)
@@ -1258,7 +1412,7 @@ class OfflinePreparationStudio(QMainWindow):
         self.UIAxes.update()
 
     def MeshingButtonPushed(self):
-        self.material['E'] = float(self.EPaEditField.text())
+        self.material['E'] = self.mpa_to_pa(float(self.EPaEditField.text()))
         self.material['nu'] = float(self.NuEditField.text())
         self.material['rho'] = float(self.rhokgm3EditField.text())
         self.element_type = self.Element_typeDropDown.currentText()
@@ -1963,7 +2117,7 @@ class OfflinePreparationStudio(QMainWindow):
             summary_text = (
                 "--- SOLVER SUMMARY ---\n"
                 f"CPU Solve Time: {solve_cpu_time:.4f} seconds\n"
-                f"Max Displacement: {np.max(np.abs(self.U_full)):.3e} m\n\n"
+                f"Max Displacement: {np.max(np.abs(self.U_full)) * 1000.0:.4f} mm\n\n"
                 "--- REACTION CHECK ---\n"
                 f"Total Applied Force: {total_applied:.3e} N\n"
                 f"Total Reaction Force: {total_reaction:.3e} N\n"
@@ -2197,11 +2351,12 @@ class OfflinePreparationStudio(QMainWindow):
         fig.clf() 
         axes = fig.subplots(3, 1); ax1, ax2, ax3 = axes[0], axes[1], axes[2]
         
-        ax1.plot(x_1d, u_1d * 1000, 'b-', linewidth=2.5); ax1.grid(True, linestyle='--'); ax1.set_ylabel('Deflection [mm]'); ax1.set_title(r'$\bf{1D\ Euler-Bernoulli\ Analytical\ Results}$')
-        ax2.plot(x_1d, s_bending_1d / 1e6, 'r-', linewidth=2.5); ax2.grid(True, linestyle='--'); ax2.set_ylabel(r'Bending $\sigma_{xx}$ [MPa]')
-        ax3.plot(x_1d, s_shear_1d / 1e6, 'g-', linewidth=2.5); ax3.grid(True, linestyle='--'); ax3.set_xlabel('Beam Length [m]'); ax3.set_ylabel(r'Shear $\tau_{xz}$ [MPa]')
+        x_1d_mm = x_1d * 1000.0
+        ax1.plot(x_1d_mm, u_1d * 1000, 'b-', linewidth=2.5); ax1.grid(True, linestyle='--'); ax1.set_ylabel('Deflection [mm]'); ax1.set_title(r'$\bf{1D\ Euler-Bernoulli\ Analytical\ Results}$')
+        ax2.plot(x_1d_mm, s_bending_1d / 1e6, 'r-', linewidth=2.5); ax2.grid(True, linestyle='--'); ax2.set_ylabel(r'Bending $\sigma_{xx}$ [MPa]')
+        ax3.plot(x_1d_mm, s_shear_1d / 1e6, 'g-', linewidth=2.5); ax3.grid(True, linestyle='--'); ax3.set_xlabel('Beam Length [mm]'); ax3.set_ylabel(r'Shear $\tau_{xz}$ [MPa]')
         
-        load_pos = (self.LoadPositionSlider.value() / 100.0) * self.geometry['Lx']
+        load_pos = (self.LoadPositionSlider.value() / 100.0) * self.geometry['Lx'] * 1000.0
         ax1.axvline(load_pos, color='k', linestyle='--', label='P'); ax2.axvline(load_pos, color='k', linestyle='--', label='P'); ax3.axvline(load_pos, color='k', linestyle='--', label='P')
         
         fig.tight_layout(pad=1.5)
@@ -2288,8 +2443,8 @@ class OfflinePreparationStudio(QMainWindow):
 
         # 2. DISCRETIZATION ERROR ANALYSIS (A)
         u_error_1d = (abs(max_u_1d - max_u_fom) / max_u_1d * 100) if max_u_1d > 1e-12 else 0.0
-        s_error_1d = (abs(max_s_1d - max_s_fom) / max_s_fom * 100) if max_s_fom > 1e-12 else 0.0
-        ss_error_1d = (abs(max_ss_1d - max_ss_fom) / max_ss_fom * 100) if max_ss_fom > 1e-12 else 0.0
+       
+        
 
         # 3. EXPERIMENTAL VALIDATION (B)
         try:
@@ -2316,12 +2471,12 @@ class OfflinePreparationStudio(QMainWindow):
             "PEAK BENDING STRESS (σ_xx):\n"
             f"  Analytical (1D) : {max_s_1d:.2f} MPa\n"
             f"  Numerical (FOM) : {max_s_fom:.2f} MPa\n"
-            f"  Error ε_σ(1D)   : {s_error_1d:.2f} %\n\n"
+           
 
             "PEAK SHEAR STRESS (τ_xz):\n"
             f"  Analytical (1D) : {max_ss_1d:.2f} MPa\n"
             f"  Numerical (FOM) : {max_ss_fom:.2f} MPa\n"
-            f"  Error ε_τ(1D)   : {ss_error_1d:.2f} %\n\n"
+          
             
             "--- (B) EXPERIMENTAL VALIDATION ---\n"
             "DEFLECTION BENCHMARK (Dial Gauge):\n"
@@ -2335,33 +2490,10 @@ class OfflinePreparationStudio(QMainWindow):
         )
         
         targetTextArea.setText(summary_text)
-        self.lock_ui() 
-
-        try:
-            if not hasattr(self, 'Sigma_Final2') or not hasattr(self, 'U_full'):
-                print("Post-Processing Error: Please run the 3D solver first!")
-                return
-
-            yield_strength = float(self.YieldStrengthMpaEditField.text()) if self.YieldStrengthMpaEditField.text() else 250.0
-            self.scale_factor = float(self.ScaleFactorEditField.text()) if self.ScaleFactorEditField.text() else 1.0
-            self.stress_type = self.TypeofStressesDropDown.currentText()
-            self.faliuremode = self.MethodDropDown.currentText()
-            display_choice = self.DisplayChoiceDropDown.currentText()
-
-            if hasattr(self, 'plot_stresses'):
-                self.plot_stresses(self.Sigma_Final2, self.stress_type, self.UIAxes5, self.U_full, self.scale_factor)
-
-            if hasattr(self, 'plot_FS'):
-                self.plot_FS(self.faliuremode, yield_strength, self.UIAxes6, self.Sigma_Final2, self.U_full, self.scale_factor, display_type=display_choice)
-                
-        except Exception as e:
-            QMessageBox.critical(None, "Post-Processing Error", f"Error:\n{str(e)}\n\n{traceback.format_exc()}")
-        finally:
-            self.unlock_ui() 
 
     def OpenPostProcessingButtonPushed(self):
         self.lock_ui() 
-        import gc
+        
         try:
             # 1. DATA VALIDATION
             # Ensure the solver has actually produced results
@@ -2376,7 +2508,7 @@ class OfflinePreparationStudio(QMainWindow):
             # 2. INPUT PARSING (With Error Handling)
             try:
                 yield_strength = float(self.YieldStrengthMpaEditField.text()) if self.YieldStrengthMpaEditField.text() else 250.0
-                sf = float(self.ScaleFactorEditField.text()) if self.ScaleFactorEditField.text() else 1.0
+                self.scalefactor = float(self.ScaleFactorEditField.text()) if self.ScaleFactorEditField.text() else 1.0
             except ValueError:
                 QMessageBox.critical(self, "Input Error", "Yield strength and Scale must be numeric values.")
                 return
@@ -2393,11 +2525,11 @@ class OfflinePreparationStudio(QMainWindow):
             # Render Stress Plot (Left)
             if hasattr(self, 'plot_stresses') and hasattr(self, 'UIAxes5'):
                 # Ensure the plotter is active before adding mesh
-                self.plot_stresses(self.Sigma_Final2, stress_type, self.UIAxes5, self.U_full, sf)
+                self.plot_stresses(self.Sigma_Final2, stress_type, self.UIAxes5, self.U_full, self.scalefactor)
 
             # Render Safety/Intensity Plot (Right)
             if hasattr(self, 'plot_FS') and hasattr(self, 'UIAxes6'):
-                self.plot_FS(fail_mode, yield_strength, self.UIAxes6, self.Sigma_Final2, self.U_full, sf, display_type=display_choice)
+                self.plot_FS(fail_mode, yield_strength, self.UIAxes6, self.Sigma_Final2, self.U_full, self.scalefactor, display_type=display_choice)
                 
         except Exception as e:
             # Catch unexpected crashes and report them without closing the app
@@ -2647,7 +2779,7 @@ class OfflinePreparationStudio(QMainWindow):
                 U_free_i = spla.spsolve(K_reduced_csr, F_red_i)
                 elapsedTime = time.perf_counter() - start_time
                 
-                new_entry = f"Snap {i+1}: {elapsedTime:.4f}s at {x_positions[i]:.2f}m\n"
+                new_entry = f"Snap {i+1}: {elapsedTime:.4f}s at {x_positions[i] * 1000.0:.1f} mm\n"
                 current_text = self.TrainningTimeTextArea.toPlainText()
                 self.TrainningTimeTextArea.setText(new_entry + current_text)
                 progress.setValue(i + 1)
@@ -2670,7 +2802,7 @@ class OfflinePreparationStudio(QMainWindow):
             mode_numbers = np.arange(1, num_snapshots + 1)
             
             ax1.bar(mode_numbers, S_disp / max(np.max(S_disp), 1e-12), color='#3399CC', alpha=0.8); ax1.set_xlabel('Mode Number'); ax1.set_ylabel('Relative Singular Values', color='black'); ax1.tick_params(axis='y', colors='black'); ax1.grid(True, linestyle='--', alpha=0.5)
-            ax2.plot(mode_numbers, cum_energy_disp, '-bo', linewidth=2, markerfacecolor='b'); ax2.set_ylabel('Cumulative Energy (%)', color='black'); ax2.set_ylim([np.min(cum_energy_disp) - 5, 105]); ax2.tick_params(axis='y', colors='black')
+            ax2.plot(mode_numbers, cum_energy_disp, '-bo', linewidth=2, markerfacecolor='b'); ax2.set_ylabel('Cumulative Energy (%)', color='black'); ax2.set_ylim([np.min(cum_energy_disp) , 100]); ax2.tick_params(axis='y', colors='black')
             ax1.set_title('ROM Invariance: Displacement Modes')
             if hasattr(fig, 'canvas'): fig.canvas.draw_idle()
                 
@@ -2715,8 +2847,9 @@ class OfflinePreparationStudio(QMainWindow):
  
     def CheckAccuracyButtonPushed(self):
         self.lock_ui() 
-        import gc
         progress = None
+        Sigma_fem = None
+        Sigma_rom = None
         try:
             # 1. DATA INTEGRITY CHECKS
             if not hasattr(self, 'Phi') or self.Phi is None or not hasattr(self, 'K_rom'):
@@ -2730,12 +2863,13 @@ class OfflinePreparationStudio(QMainWindow):
             try:
                 x_pos = (self.ValidationLoadPositionSlider.value() / 100.0) * self.geometry['Lx'] 
                 P_val = float(self.ValidationLoadNEditField.text())
+                scale_factor = float(self.ScaleFactorEditField.text()) if self.ScaleFactorEditField.text() else 1.0
             except ValueError:
-                QMessageBox.warning(self, "Input Error", "Invalid Load Value.")
+                QMessageBox.warning(self, "Input Error", "Load value and scale factor must be numeric.")
                 return
                 
             stress_type = self.TypeofStressesDropDown_2.currentText()
-            
+           
             # 3. INITIALIZE PROGRESS
             progress = QProgressDialog("Validating FEM vs ROM...", "Cancel", 0, 4, self)
             progress.setWindowTitle("ROM Validation Engine")
@@ -2774,7 +2908,7 @@ class OfflinePreparationStudio(QMainWindow):
             time_fem_stress = time.perf_counter() - t0
             
             if hasattr(self, 'UIAxes9'):
-                self.plot_stresses(Sigma_fem, stress_type, self.UIAxes9, U_full_fem, self.scale_factor)
+                self.plot_stresses(Sigma_fem, stress_type, self.UIAxes9, U_full_fem, scale_factor)
             
             progress.setValue(2)
             gc.collect() # Clear temporary FEM arrays from RAM
@@ -2797,32 +2931,40 @@ class OfflinePreparationStudio(QMainWindow):
             time_rom_stress = time.perf_counter() - t0
             
             if hasattr(self, 'UIAxes10'):
-                self.plot_stresses(Sigma_rom, stress_type, self.UIAxes10, U_full_rom, self.scale_factor)
+                self.plot_stresses(Sigma_rom, stress_type, self.UIAxes10, U_full_rom, scale_factor)
             
             progress.setValue(4)
 
             # 9. ERROR ANALYSIS
             norm_U_fem = np.linalg.norm(U_free_fem)
             rel_error_U = (np.linalg.norm(U_free_fem - U_free_rom_proj) / max(norm_U_fem, 1e-12)) * 100.0
-            
-            norm_S_fem = np.linalg.norm(Sigma_fem[:, 0])
-            rel_error_Stress = (np.linalg.norm(Sigma_fem[:, 0] - Sigma_rom[:, 0]) / max(norm_S_fem, 1e-12)) * 100.0
+            rel_error_Sigma = np.linalg.norm(Sigma_fem - Sigma_rom) / max(np.linalg.norm(Sigma_fem), 1e-12) * 100.0
             
             speed_up_solve = time_fem_solve / max(time_rom_solve, 1e-9)
             speed_up_stress = time_fem_stress / max(time_rom_stress, 1e-9)
 
             # 10. GENERATE REPORT
             results_text = (
-                "--- PERFORMANCE & SPEEDUP ---\n"
-                f"FEM Solve+Stress: {(time_fem_solve + time_fem_stress):.4f} s\n"
-                f"ROM Solve+Stress: {(time_rom_solve + time_rom_stress):.4f} s\n"
-                f"Total System Speedup: {(time_fem_solve + time_fem_stress)/(time_rom_solve + time_rom_stress):.1f}x\n\n"
-                "--- ACCURACY (Relative L2 Error) ---\n"
-                f"Displacement Error: {rel_error_U:.4f} %\n"
-                f"Stress (Bending) Error: {rel_error_Stress:.4f} %\n\n"
-                "--- NUMERICAL VALUES ---\n"
+                "--- DISPLACEMENT COMPARISON ---\n"
+                f"FEM Max U: {np.max(np.abs(U_full_fem)):.4e} m\n"
+                f"ROM Max U: {np.max(np.abs(U_full_rom)):.4e} m\n"
+                f"Relative Error: {rel_error_U:.4f} %\n\n"
+
+                "--- STRESS CHECK (\u03c3_xx) ---\n"
                 f"FEM Max Stress: {np.max(np.abs(Sigma_fem[:,0]))/1e6:.2f} MPa\n"
-                f"ROM Max Stress: {np.max(np.abs(Sigma_rom[:,0]))/1e6:.2f} MPa"
+                f"ROM Max Stress: {np.max(np.abs(Sigma_rom[:,0]))/1e6:.2f} MPa\n"
+                f"Relative Error: {rel_error_Sigma:.4f} %\n\n"
+
+                "--- PERFORMANCE ---\n"
+                f"FEM Solve: {time_fem_solve:.4f} s\n"
+                f"ROM Solve: {time_rom_solve:.4f} s\n"
+                f"ROM is {speed_up_solve:.1f}x Faster\n\n"
+                f"FEM Stress Reconstruction: {time_fem_stress:.4f} s\n"
+                f"ROM Stress Reconstruction: {time_rom_stress:.4f} s\n"
+                f"ROM Stress is {speed_up_stress:.1f}x Faster\n\n"
+                f"FEM Total Time: {(time_fem_solve + time_fem_stress):.4f} s\n"
+                f"ROM Total Time: {(time_rom_solve + time_rom_stress):.4f} s\n"
+                f"Total System Speedup: {(time_fem_solve + time_fem_stress)/(time_rom_solve + time_rom_stress):.1f}x\n\n"    
             )
             self.AccuracyResultsTextArea.setText(results_text)
 
@@ -2948,181 +3090,448 @@ class CalibrationWindow(QMainWindow):
     def __init__(self, sensor_manager, parent_geometry):
         super().__init__()
         self.setWindowTitle("Module 2: Hardware Calibration Bay")
-        self.setGeometry(200, 200, 1000, 600)
+        self.setGeometry(200, 200, 1200, 700)
         self.sm = sensor_manager
         self.beam_geometry = parent_geometry
-        
+        self._updating_table = False
+        self.sm.L_m = float(parent_geometry.get('Lx', self.sm.L_m))
+        self.sm.b_m = float(parent_geometry.get('Ly', self.sm.b_m))
+        self.sm.h_m = float(parent_geometry.get('Lz', self.sm.h_m))
+        self.sm.I_m4 = (self.sm.b_m * self.sm.h_m**3) / 12.0
+        self.sm.EI = (self.sm.E_GPa * 1e9) * self.sm.I_m4
+
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.layout = QHBoxLayout(self.central_widget)
-        
+
         self.build_ui()
+        self.refresh_ports()
         self.live_timer = QTimer()
         self.live_timer.timeout.connect(self.update_live_dashboard)
-        
+
     def build_ui(self):
         left = QVBoxLayout(); mid = QVBoxLayout(); right = QVBoxLayout()
 
         c_grp = QGroupBox("Hardware Controls"); c_lay = QFormLayout()
         ProfessionalTheme.apply_professional_panel_style(c_grp)
-        self.btn_conn = QPushButton("🔌 Connect Arduino")
+        self.combo_ports = QComboBox()
+        self.btn_refresh_ports = QPushButton("Scan Ports")
+        self.btn_refresh_ports.clicked.connect(self.refresh_ports)
+        port_h = QHBoxLayout(); port_h.addWidget(self.combo_ports); port_h.addWidget(self.btn_refresh_ports)
+        self.btn_conn = QPushButton("Connect Arduino")
         self.btn_conn.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=140))
         self.btn_conn.clicked.connect(self.handle_connect)
-        self.lbl_status = QLabel("⚪ Disconnected")
+        self.lbl_status = QLabel("Disconnected")
         self.lbl_status.setStyleSheet(f"color: {ProfessionalTheme.TEXT_GRAY}; font-weight: 500;")
-        
-        self.btn_load_tare = QPushButton("📊 Tare Load Cell")
+        c_lay.addRow("Select Device:", port_h)
+        c_lay.addRow(self.btn_conn, self.lbl_status)
+        c_grp.setLayout(c_lay); left.addWidget(c_grp)
+
+        load_grp = QGroupBox("Load Cell")
+        ProfessionalTheme.apply_professional_panel_style(load_grp)
+        load_lay = QFormLayout()
+        self.btn_load_tare = QPushButton("Tare Load Cell")
         self.btn_load_tare.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.INFO_PURPLE, width=140))
         self.btn_load_tare.clicked.connect(self.tare_load)
-        self.m_input = QLineEdit("1.0")
+        self.m_input = QLineEdit("1.0"); self.inp_mass = self.m_input
         self.m_input.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 6px; font-size: 10pt;")
-        self.btn_load_cal = QPushButton("⚙️ Set Load Factor")
+        self.btn_load_cal = QPushButton("Set Load Factor")
         self.btn_load_cal.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=140))
         self.btn_load_cal.clicked.connect(self.calibrate_load)
-        
-        self.btn_strain_tare = QPushButton("📈 Tare Strain")
+        self.inp_offset_n = QLineEdit("0.0")
+        self.inp_offset_n.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 6px; font-size: 10pt;")
+        load_lay.addRow(self.btn_load_tare)
+        load_lay.addRow("Standard Mass (kg):", self.m_input)
+        load_lay.addRow(self.btn_load_cal)
+        load_lay.addRow("Load Offset (N):", self.inp_offset_n)
+        load_grp.setLayout(load_lay); left.addWidget(load_grp)
+
+        TOF_grp = QGroupBox("TOF Sensor")
+        ProfessionalTheme.apply_professional_panel_style(TOF_grp)
+        TOF_lay = QFormLayout()
+        self.btn_tare_TOF = QPushButton("Tare TOF")
+        self.btn_tare_TOF.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.INFO_PURPLE, width=140))
+        self.btn_tare_TOF.clicked.connect(self.tare_TOF)
+        self.inp_TOF_offset = QLineEdit("0.0")
+        TOF_lay.addRow(self.btn_tare_TOF)
+        TOF_lay.addRow("TOF Offset (mm):", self.inp_TOF_offset)
+        TOF_grp.setLayout(TOF_lay); left.addWidget(TOF_grp)
+
+        strain_grp = QGroupBox("Strain Gauge")
+        ProfessionalTheme.apply_professional_panel_style(strain_grp)
+        strain_lay = QFormLayout()
+        self.btn_compute_af = QPushButton("Compute AF")
+        self.btn_compute_af.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=140))
+        self.btn_compute_af.clicked.connect(self.find_af)
+        self.btn_strain_tare = QPushButton("Tare Strain")
         self.btn_strain_tare.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.INFO_PURPLE, width=140))
         self.btn_strain_tare.clicked.connect(self.tare_strain)
-        self.d_input = QLineEdit("1.0")
-        self.d_input.setStyleSheet(f"border: 1px solid {ProfessionalTheme.BORDER_LIGHT}; border-radius: 4px; padding: 6px; font-size: 10pt;")
-        self.btn_strain_cal = QPushButton("⚙️ Set AMP_GAIN")
-        self.btn_strain_cal.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=140))
-        self.btn_strain_cal.clicked.connect(self.calibrate_gain)
-
-        c_lay.addRow(self.btn_conn, self.lbl_status); c_lay.addRow(self.btn_load_tare)
-        c_lay.addRow("Standard Mass (kg):", self.m_input); c_lay.addRow(self.btn_load_cal)
-        c_lay.addRow(self.btn_strain_tare); c_lay.addRow("Dial Gauge (mm):", self.d_input)
-        c_lay.addRow(self.btn_strain_cal); c_grp.setLayout(c_lay); left.addWidget(c_grp)
-
-        v_grp = QGroupBox("Validation Mode"); v_lay = QFormLayout()
-        ProfessionalTheme.apply_professional_panel_style(v_grp)
-        self.mode = QComboBox(); self.mode.addItems(["Fixed-Fixed", "Simply Supported", "Cantilever"])
+        self.btn_calc_strain_pos = QPushButton("Calculate Strain Positions")
+        self.btn_calc_strain_pos.setStyleSheet(ProfessionalTheme.create_button_style(ProfessionalTheme.ACCENT_BLUE, width=180))
+        self.btn_calc_strain_pos.clicked.connect(self.calculate_strain_positions)
+        self.mode = QComboBox(); self.mode.addItems(["Fixed-Fixed", "Simply Supported", "Cantilever"]); self.mode_combo = self.mode
+        self.inp_x1 = QLineEdit("125")
         self.pos_x = QLineEdit("250.0")
-        v_lay.addRow("Beam Boundary:", self.mode); v_lay.addRow("Gauge X (mm):", self.pos_x)
-        v_grp.setLayout(v_lay); left.addWidget(v_grp); left.addStretch()
+        self.inp_x3 = QLineEdit("375")
+        self.fiber_combo = QComboBox(); self.fiber_combo.addItems(["Top Surface (+h/2)", "Bottom Surface (-h/2)", "Custom Y (mm)"])
+        self.fiber_combo.currentIndexChanged.connect(self.toggle_custom_y)
+        self.inp_y_custom = QLineEdit("1.5"); self.inp_y_custom.setEnabled(False)
+        self.d_input = QLineEdit("1.0"); self.inp_dial = self.d_input
+        strain_lay.addRow(self.btn_compute_af)
+        strain_lay.addRow(self.btn_strain_tare)
+        strain_lay.addRow(self.btn_calc_strain_pos)
+        strain_lay.addRow("Beam Boundary:", self.mode)
+        strain_lay.addRow("Left Gauge X (mm):", self.inp_x1)
+        strain_lay.addRow("Mid Gauge X (mm):", self.pos_x)
+        strain_lay.addRow("Right Gauge X (mm):", self.inp_x3)
+        strain_lay.addRow("Gauge Y-Fiber:", self.fiber_combo)
+        strain_lay.addRow("Custom Y offset (mm):", self.inp_y_custom)
+        strain_lay.addRow("Dial Gauge (mm):", self.d_input)
+        strain_grp.setLayout(strain_lay); left.addWidget(strain_grp); left.addStretch()
 
-        self.log_a = QTextEdit(); self.log_a.setReadOnly(True)
+        self.log_a = QTextEdit(); self.log_a.setReadOnly(True); self.log_box = self.log_a
         self.log_a.setStyleSheet(f"background: {ProfessionalTheme.CONSOLE_BG}; color: {ProfessionalTheme.CONSOLE_TEXT}; font-family: Courier; border: 1px solid {ProfessionalTheme.BORDER_COLOR}; border-radius: 4px;")
-        mid.addWidget(QLabel("<b style='color: {ProfessionalTheme.PRIMARY_BLUE};'>Process Log:</b>")); mid.addWidget(self.log_a)
-        
+        mid.addWidget(QLabel(f"<b style='color: {ProfessionalTheme.PRIMARY_BLUE};'>Process Log:</b>")); mid.addWidget(self.log_a)
+
         f_grp = QGroupBox("Derived Factors"); f_lay = QFormLayout()
         ProfessionalTheme.apply_professional_panel_style(f_grp)
-        self.l_fac = QLabel("1.0"); self.a_fac = QLabel("100.0")
-        f_lay.addRow("Load Factor (bits/kg):", self.l_fac); f_lay.addRow("AMP_GAIN:", self.a_fac)
+        self.l_tare = QLabel("0.0"); self.l_fac = QLabel("1.0"); self.l_af = QLabel("2.0")
+        f_lay.addRow("Load Tare Raw (bits):", self.l_tare)
+        f_lay.addRow("Load Factor (bits/kg):", self.l_fac)
+        f_lay.addRow("Asymmetric Factor (AF):", self.l_af)
         f_grp.setLayout(f_lay); mid.addWidget(f_grp)
 
         d_grp = QGroupBox("Live Readouts"); d_lay = QGridLayout()
         ProfessionalTheme.apply_professional_panel_style(d_grp)
         self.l_load = QLabel("0.00 N"); self.l_s1 = QLabel("0.0 uE"); self.l_s2 = QLabel("0.0 uE")
-        self.l_s3 = QLabel("0.0 uE"); self.l_virt = QLabel("0.00 mm"); self.l_pos = QLabel("0.00 mm")
-        
+        self.l_s3 = QLabel("0.0 uE"); self.l_pos = QLabel("0.00 mm")
         style = f"font-size: 14pt; font-weight: bold; color: {ProfessionalTheme.SUCCESS_GREEN}; background: {ProfessionalTheme.CONSOLE_BG}; padding: 8px; border-radius: 4px; border: 1px solid {ProfessionalTheme.PRIMARY_BLUE};"
-        for lbl in [self.l_load, self.l_s1, self.l_s2, self.l_s3, self.l_virt, self.l_pos]: lbl.setStyleSheet(style)
-        
+        for lbl in [self.l_load, self.l_s1, self.l_s2, self.l_s3,  self.l_pos]: lbl.setStyleSheet(style);
         d_lay.addWidget(QLabel("Force:"), 0, 0); d_lay.addWidget(self.l_load, 0, 1)
         d_lay.addWidget(QLabel("Strain Support Left:"), 1, 0); d_lay.addWidget(self.l_s1, 1, 1)
         d_lay.addWidget(QLabel("Strain Mid:"), 2, 0); d_lay.addWidget(self.l_s2, 2, 1)
         d_lay.addWidget(QLabel("Strain Support Right:"), 3, 0); d_lay.addWidget(self.l_s3, 3, 1)
-        d_lay.addWidget(QLabel("VIRTUAL DIAL:"), 4, 0); d_lay.addWidget(self.l_virt, 4, 1)
+      
         d_lay.addWidget(QLabel("Position:"), 5, 0); d_lay.addWidget(self.l_pos, 5, 1)
         d_grp.setLayout(d_lay); right.addWidget(d_grp)
 
-        self.t_def = QTableWidget(5, 4); self.t_def.setHorizontalHeaderLabels(["Pt", "Physical (mm)", "Virtual (mm)", "Error %"])
-        self.t_lod = QTableWidget(5, 5); self.t_lod.setHorizontalHeaderLabels(["Pt", "Mass (kg)", "Ref (N)", "Live (N)", "Error %"])
-        self.t_pos = QTableWidget(5, 4); self.t_pos.setHorizontalHeaderLabels(["Pt", "Manual (mm)", "Ultra (mm)", "Error %"])
-
+        self.t_def = self.create_strain_table()
+        self.t_lod = QTableWidget(5, 6); self.t_lod.setHorizontalHeaderLabels(["Pt", "Mass (kg)", "Ref (N)", "Raw ADC", "Live Load (N)", "Error %"])
+        self.t_pos = QTableWidget(5, 4); self.t_pos.setHorizontalHeaderLabels(["Pt", "Manual (mm)", "TOF(mm)", "Error %"])
         for t in [self.t_def, self.t_lod, self.t_pos]:
-            for i in range(5): 
+            try: t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            except Exception: pass
+            for i in range(5):
                 t.setItem(i, 0, QTableWidgetItem(f"Pt {i+1}"))
                 for col in range(1, t.columnCount()): t.setItem(i, col, QTableWidgetItem("0.0"))
-
-        self.t_def.itemChanged.connect(self.auto_fill_def)
+        self.t_def.itemChanged.connect(self.t_strain_item_changed)
         self.t_lod.itemChanged.connect(self.auto_fill_lod)
         self.t_pos.itemChanged.connect(self.auto_fill_pos)
-
-        r_def = QPushButton("Refresh Deflection Table"); r_def.clicked.connect(lambda: self.clear_table(self.t_def))
+        r_def = QPushButton("Refresh Strain Table"); r_def.clicked.connect(lambda: self.clear_table(self.t_def))
         r_lod = QPushButton("Refresh Load Table"); r_lod.clicked.connect(lambda: self.clear_table(self.t_lod))
         r_pos = QPushButton("Refresh Position Table"); r_pos.clicked.connect(lambda: self.clear_table(self.t_pos))
-
-        right.addWidget(QLabel("<b>Deflection Validation</b>")); right.addWidget(self.t_def); right.addWidget(r_def)
+        right.addWidget(QLabel("<b>Strain Validation</b>")); right.addWidget(self.t_def); right.addWidget(r_def)
         right.addWidget(QLabel("<b>Load Validation</b>")); right.addWidget(self.t_lod); right.addWidget(r_lod)
         right.addWidget(QLabel("<b>Position Validation</b>")); right.addWidget(self.t_pos); right.addWidget(r_pos)
-
         self.layout.addLayout(left, 1); self.layout.addLayout(mid, 2); self.layout.addLayout(right, 3)
-        
+
+    def create_strain_table(self):
+        t = QTableWidget(5, 11)
+        t.setHorizontalHeaderLabels(["Pt", "Dial (mm)", "S1_Th", "S2_Th", "S3_Th", "S1_Measure", "S2_Measure", "S3_Measure", "S1_Err %", "S2_Err %", "S3_Err %"])
+        return t
+
     def showEvent(self, event):
         self.live_timer.start(100); super().showEvent(event)
-        
+
     def closeEvent(self, event):
         self.live_timer.stop(); event.accept()
 
+    def toggle_custom_y(self, idx):
+        self.inp_y_custom.setEnabled(idx == 2)
+
+    def refresh_ports(self):
+        self.combo_ports.clear()
+        ports = serial.tools.list_ports.comports()
+        for port in ports:
+            self.combo_ports.addItem(f"{port.device} - {port.description}", port.device)
+        if not ports:
+            self.combo_ports.addItem("No COM Ports Detected", None)
+            self.log("Scanned: No active COM ports found. Check USB cable.")
+        else:
+            self.log(f"Scanned: Found {len(ports)} available device(s).")
+
     def handle_connect(self):
-        if self.sm.connect(): self.lbl_status.setText("Connected"); self.log("Serial Ready.")
+        selected_port = self.combo_ports.currentData() or self.sm.port
+        if not selected_port:
+            self.log("Error: Please select a valid COM port from the dropdown.")
+            return
+        if self.sm.connect(selected_port):
+            self.lbl_status.setText(f"Connected ({selected_port})")
+            self.lbl_status.setStyleSheet("color: #00aa00; font-weight: bold;")
+            self.log(f"Hardware synchronized successfully on {selected_port}.")
+        else:
+            self.lbl_status.setText("Connection Failed")
+            self.lbl_status.setStyleSheet("color: red; font-weight: bold;")
+            self.log(f"Failed to open {selected_port}. Is the serial monitor open in Arduino IDE?")
+
+    def find_af(self):
+        raw = self.sm.get_average_raw(20)
+        if raw is None:
+            self.log("Error: No strain data for AF computation.")
+            return
+        for i in range(3):
+            self.sm.strain_af[i] = self.sm.compute_af(raw[i])
+        avg_af = np.mean(self.sm.strain_af)
+        self.l_af.setText(f"{avg_af:.3f}")
+        self.log(f"AF computed: S1={self.sm.strain_af[0]:.3f}, S2={self.sm.strain_af[1]:.3f}, S3={self.sm.strain_af[2]:.3f}")
 
     def tare_load(self):
-        raw = self.sm.get_average_raw(20); self.sm.load_tare = raw[0]; self.log("Load Tared.")
+        raw = self.sm.get_average_raw(15)
+        if raw is None:
+            self.log("Error: Cannot tare load; no data.")
+            return
+        self.sm.load_tare = raw[3]
+        self.l_tare.setText(f"{self.sm.load_tare:.1f}")
+        self.log("Load cell tared from raw channel 4.")
 
     def calibrate_load(self):
-        raw = self.sm.get_average_raw(20); self.sm.load_calib_factor = (raw[0] - self.sm.load_tare) / float(self.m_input.text())
-        self.l_fac.setText(f"{self.sm.load_calib_factor:.4f}"); self.log("Load Factor Set.")
+        raw = self.sm.get_average_raw(20)
+        if raw is None:
+            self.log("Error: No raw data for load calibration.")
+            return
+        try:
+            mass = float(self.inp_mass.text())
+            offset = float(self.inp_offset_n.text())
+        except ValueError:
+            self.log("Error: Invalid mass or load offset.")
+            return
+        self.sm.load_offset_n = offset
+        ref_n = mass * self.sm.GRAVITY
+        raw_delta = raw[3] - self.sm.load_tare
+        if ref_n - offset == 0 or raw_delta == 0:
+            self.log("Error: Invalid load calibration values; divide by zero.")
+            return
+        self.sm.load_calib_factor = (raw_delta * self.sm.GRAVITY) / (ref_n - offset)
+        self.l_fac.setText(f"{self.sm.load_calib_factor:.3f}")
+        self.log(f"Load calibration factor computed: {self.sm.load_calib_factor:.3f}")
 
     def tare_strain(self):
-        raw = self.sm.get_average_raw(30); self.sm.strain_zero_bits = raw[2]; self.log("Strain Tared.")
+        raw = self.sm.get_average_raw(20)
+        if raw is None:
+            self.log("Error: Cannot tare strain; no data.")
+            return
+        for i in range(3):
+            self.sm.strain_tare_bits[i] = raw[i]
+        self.sm.strain_zero_bits = raw[1]
+        self.log("All strain gauges tared from raw channels 1-3.")
 
     def calibrate_gain(self):
-        raw = self.sm.get_average_raw(30); dial_m = float(self.d_input.text()) / 1000.0
-        BEAM_H, BEAM_L = self.beam_geometry['Lz'], self.beam_geometry['Lx']
-        eps = (12.0 * BEAM_H * dial_m) / (BEAM_L**2)
-        dV = ((raw[2] - self.sm.strain_zero_bits) * 5.0) / 1023.0
-        self.sm.amp_gain = (4.0 * dV) / (eps * self.sm.GF * self.sm.V_IN)
-        self.a_fac.setText(f"{self.sm.amp_gain:.2f}"); self.log("Gain Set.")
+        self.find_af()
+
+    def tare_TOF(self):
+        raw = self.sm.get_average_raw(15)
+        if raw is None:
+            self.log("Error: Cannot tare TOF; no data.")
+            return
+        try: TOF_offset = float(self.inp_TOF_offset.text())
+        except ValueError: TOF_offset = 0.0
+        
+        self.sm.TOF_offset_mm = TOF_offset
+        TOF_pos_tare = raw[4] + TOF_offset
+        self.sm.TOF_tare = raw[4]
+        self.sm.TOF_tare_pos = TOF_pos_tare
+        self.log(f"TOF tared: position={TOF_pos_tare:.2f} mm, offset={TOF_offset:.1f} mm.")
+
+    def _theory_strains(self, dial_mm, mode_idx=None):
+        dial_m = dial_mm / 1000.0
+        L = self.sm.L_m
+        EI = self.sm.EI
+        H = self.sm.h_m
+        
+        if mode_idx is None:
+            mode_idx = self.mode.currentIndex()
+            
+        if self.fiber_combo.currentIndex() == 0:
+            y_fiber = H / 2.0
+        elif self.fiber_combo.currentIndex() == 1:
+            y_fiber = -H / 2.0
+        else:
+            try: y_fiber = float(self.inp_y_custom.text()) / 1000.0
+            except ValueError: y_fiber = H / 2.0
+            
+        try:
+            x1_m = float(self.inp_x1.text()) / 1000.0
+            x2_m = float(self.pos_x.text()) / 1000.0
+            x3_m = float(self.inp_x3.text()) / 1000.0
+        except ValueError:
+            x1_m, x2_m, x3_m = L * 0.25, L * 0.5, L * 0.75
+
+        # Dial gauge is assumed positioned at the center (x = L/2) for calculating equivalent force P
+        x_dial = L / 2.0
+
+        if mode_idx == 0:  # --- FIXED-FIXED BEAM ---
+            # Deflection at center (x = L/2) for symmetric load P at center: delta = (P * L^3) / (192 * EI)
+            P_equiv = (dial_m * 192.0 * EI) / (L**3)
+            
+            def get_theory_uE(x):
+                # Exact symmetric Fixed-Fixed bending moment profile: M(x) = P/2 * x - P*L/8 (for left half)
+                xx = x if x <= L / 2.0 else L - x
+                M = (P_equiv * xx / 2.0) - (P_equiv * L / 8.0)
+                return (-y_fiber * (M / EI)) * 1e6
+
+        elif mode_idx == 1:  # --- SIMPLY SUPPORTED BEAM ---
+            # Deflection at center (x = L/2) for symmetric load P at center: delta = (P * L^3) / (48 * EI)
+            P_equiv = (dial_m * 48.0 * EI) / (L**3)
+            
+            def get_theory_uE(x):
+                # Exact symmetric Simply Supported bending moment profile: M(x) = P/2 * x (for left half)
+                xx = x if x <= L / 2.0 else L - x
+                M = (P_equiv * xx) / 2.0
+                return (-y_fiber * (M / EI)) * 1e6
+
+        else:  # --- CANTILEVER BEAM ---
+            # Deflection at free end (x = L) for a point load P at the free end: delta = (P * L^3) / (3 * EI)
+            # Alternatively, if your physical dial gauge measures at the free end (L), use 3.0. 
+            P_equiv = (dial_m * 3.0 * EI) / (L**3)
+            
+            def get_theory_uE(x):
+                # Exact Cantilever bending moment profile from fixed end (x=0) to free end (x=L):
+                # M(x) = -P * (L - x)
+                M = -P_equiv * (L - x)
+                return (-y_fiber * (M / EI)) * 1e6
+
+        return [get_theory_uE(x1_m), get_theory_uE(x2_m), get_theory_uE(x3_m)]
 
     def update_live_dashboard(self):
+        if not self.sm.is_connected:
+            return
         raw = self.sm.get_average_raw(1)
-        if raw is not None:
-            force_n = ((raw[0] - self.sm.load_tare) / self.sm.load_calib_factor) * self.sm.GRAVITY
-            strains = [((raw[i] - self.sm.strain_zero_bits)*5.0/1023.0)*4e6/(self.sm.GF*self.sm.V_IN*self.sm.amp_gain) for i in range(1,4)]
-            mode = self.mode.currentIndex(); L, H = self.beam_geometry['Lx'], self.beam_geometry['Lz']
-            e = strains[1]/1e6
-            if mode == 0: v = (e*L**2)/(12*H)
-            elif mode == 1: v = (e*L**2)/(6*H)
-            else: v = (e*(float(self.pos_x.text())/1000.0)**2)/(3*H)
-            p_mm = (raw[4] *0.343)/2
-            self.l_load.setText(f"{force_n:.2f} N") 
-            self.l_s2.setText(f"{strains[1]:.1f} uE");self.l_s1.setText(f"{strains[0]:.1f} uE");self.l_s3.setText(f"{strains[2]:.1f} uE")
-            self.l_virt.setText(f"{v*1000:.3f} mm"); self.l_pos.setText(f"{p_mm:.2f} mm")
+        if raw is None:
+            return
+        if self.sm.load_calib_factor == 0 or not np.isfinite(self.sm.load_calib_factor):
+            self.l_load.setText("-- N")
+            self.log("Invalid load factor. Recalibrate load cell with a known mass.")
+            return
+        try: offset = float(self.inp_offset_n.text())
+        except ValueError: offset = 0.0
+        self.sm.load_offset_n = offset
+        force_n = ((raw[3] - self.sm.load_tare) / self.sm.load_calib_factor) * self.sm.GRAVITY + offset
+    
+        try: TOF_offset = float(self.inp_TOF_offset.text())
+        except ValueError: TOF_offset = 0.0
+        self.sm.TOF_offset_mm = TOF_offset
+        p_mm = raw[4] + TOF_offset
+        strains = [self.sm.calc_microstrain(raw[i], self.sm.strain_tare_bits[i], self.sm.strain_af[i]) for i in range(3)]
+        
+        self.l_load.setText(f"{force_n:.2f} N")
+        self.l_s1.setText(f"{strains[0]:.1f} uE"); self.l_s2.setText(f"{strains[1]:.1f} uE"); self.l_s3.setText(f"{strains[2]:.1f} uE")
+        self.l_pos.setText(f"{p_mm:.2f} mm")
+        self.l_tare.setText(f"{self.sm.load_tare:.1f}"); self.l_fac.setText(f"{self.sm.load_calib_factor:.3f}")
+
+    def t_strain_item_changed(self, item):
+        if self._updating_table or item.column() != 1:
+            return
+        try:
+            dial_mm = float(item.text())
+            raw = self.sm.get_average_raw(20)
+            if raw is None: return
+            th = self._theory_strains(dial_mm)
+            meas_signed = [self.sm.calc_microstrain(raw[i], self.sm.strain_tare_bits[i], self.sm.strain_af[i]) for i in range(3)]
+            meas = [abs(v) for v in meas_signed]
+            errs = [abs((abs(th[i]) - meas[i]) / abs(th[i])) * 100.0 if th[i] != 0 else 0.0 for i in range(3)]
+            self._updating_table = True
+            for col, val in enumerate(th + meas_signed + errs, start=2):
+                suffix = "%" if col >= 8 else ""
+                item.tableWidget().setItem(item.row(), col, QTableWidgetItem(f"{val:.1f}{suffix}"))
+            self._updating_table = False
+        except Exception as e:
+            self._updating_table = False
+            self.log(f"Strain table update error: {e}")
 
     def auto_fill_def(self, item):
-        if item.column() == 1:
-            row, val = item.row(), float(self.l_virt.text().replace(" mm",""))
-            self.t_def.blockSignals(True); self.t_def.setItem(row, 2, QTableWidgetItem(f"{val:.3f}"))
-            m = float(item.text())
-            if m != 0: self.t_def.setItem(row, 3, QTableWidgetItem(f"{abs((val-m)/m)*100:.2f}%"))
-            self.t_def.blockSignals(False)
+        self.t_strain_item_changed(item)
 
     def auto_fill_lod(self, item):
-        if item.column() == 1:
-            row = item.row(); mass_kg = float(item.text()); ref_n = mass_kg * self.sm.GRAVITY
-            live_n = float(self.l_load.text().replace(" N",""))
-            self.t_lod.blockSignals(True); self.t_lod.setItem(row, 2, QTableWidgetItem(f"{ref_n:.2f}")); self.t_lod.setItem(row, 3, QTableWidgetItem(f"{live_n:.2f}"))
-            if ref_n != 0: self.t_lod.setItem(row, 4, QTableWidgetItem(f"{abs((live_n-ref_n)/ref_n)*100:.2f}%"))
-            self.t_lod.blockSignals(False)
+        if self._updating_table or item.column() != 1:
+            return
+        try:
+            mass = float(item.text())
+            raw = self.sm.get_average_raw(10)
+            if raw is None: return
+            ref_n = mass * self.sm.GRAVITY
+            raw_adc = raw[3]
+            try: offset = float(self.inp_offset_n.text())
+            except ValueError: offset = 0.0
+            live_n = ((raw_adc - self.sm.load_tare) / self.sm.load_calib_factor) * self.sm.GRAVITY + offset
+            error = abs((live_n - ref_n) / ref_n) * 100.0 if ref_n != 0 else 0.0
+            self._updating_table = True
+            self.t_lod.setItem(item.row(), 2, QTableWidgetItem(f"{ref_n:.3f}"))
+            self.t_lod.setItem(item.row(), 3, QTableWidgetItem(f"{raw_adc:.1f}"))
+            self.t_lod.setItem(item.row(), 4, QTableWidgetItem(f"{live_n:.3f}"))
+            self.t_lod.setItem(item.row(), 5, QTableWidgetItem(f"{error:.2f}%"))
+            self._updating_table = False
+        except Exception as e:
+            self._updating_table = False
+            self.log(f"Load table update error: {e}")
 
     def auto_fill_pos(self, item):
-        if item.column() == 1:
-            row, val = item.row(), float(self.l_pos.text().replace(" mm",""))
-            self.t_pos.blockSignals(True); self.t_pos.setItem(row, 2, QTableWidgetItem(f"{val:.2f}"))
-            m = float(item.text())
-            if m != 0: self.t_pos.setItem(row, 3, QTableWidgetItem(f"{abs((val-m)/m)*100:.2f}%"))
-            self.t_pos.blockSignals(False)
+        if self._updating_table or item.column() != 1:
+            return
+        try:
+            man_pos = float(item.text())
+            try: TOF_offset =  float(self.inp_TOF_offset.text())
+            except ValueError: TOF_offset = 0.0
+            raw= self.sm.get_average_raw(10)
+            TOF_pos =  raw[4]  + TOF_offset
+            error = abs((TOF_pos - man_pos) / man_pos) * 100.0 if man_pos != 0 else 0.0
+            self._updating_table = True
+            self.t_pos.setItem(item.row(), 2, QTableWidgetItem(f"{TOF_pos:.2f}"))
+            self.t_pos.setItem(item.row(), 3, QTableWidgetItem(f"{error:.2f}%"))
+            self._updating_table = False
+        except Exception as e:
+            self._updating_table = False
+            self.log(f"Position table update error: {e}")
+
+    def calculate_strain_positions(self):
+        raw = self.sm.get_average_raw(20)
+        if raw is None:
+            self.log("Error: cannot compute positions; no raw data.")
+            return
+        try: dial_mm = float(self.inp_dial.text())
+        except ValueError:
+            self.log("Error: invalid dial input for position calculation.")
+            return
+        L = self.sm.L_m
+        meas = [abs(self.sm.calc_microstrain(raw[i], self.sm.strain_tare_bits[i], self.sm.strain_af[i])) for i in range(3)]
+        best = []
+        for ch, ref_text in [(0, self.inp_x1.text()), (2, self.inp_x3.text())]:
+            try: ref = float(ref_text) / 1000.0
+            except ValueError: ref = L * (0.25 if ch == 0 else 0.75)
+            xs = np.linspace(max(0.0, ref - 0.0025), min(L, ref + 0.0025), 20)
+            best_x, best_err = ref, float("inf")
+            for x in xs:
+                old = self.inp_x1.text() if ch == 0 else self.inp_x3.text()
+                if ch == 0: self.inp_x1.setText(f"{x * 1000.0:.3f}")
+                else: self.inp_x3.setText(f"{x * 1000.0:.3f}")
+                th = abs(self._theory_strains(dial_mm)[ch])
+                err = abs(th - meas[ch])
+                if err < best_err:
+                    best_x, best_err = x, err
+                if ch == 0: self.inp_x1.setText(old)
+                else: self.inp_x3.setText(old)
+            best.append((best_x, best_err))
+        self.inp_x1.setText(f"{best[0][0] * 1000.0:.1f}")
+        self.inp_x3.setText(f"{best[1][0] * 1000.0:.1f}")
+        self.log(f"Estimated sensor X positions: Left={best[0][0] * 1000.0:.1f} mm, Right={best[1][0] * 1000.0:.1f} mm")
 
     def clear_table(self, t):
         t.blockSignals(True)
-        for i in range(5):
+        for i in range(t.rowCount()):
             for j in range(1, t.columnCount()): t.setItem(i, j, QTableWidgetItem("0.0"))
         t.blockSignals(False)
 
-    def log(self, msg): self.log_a.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
+    def log(self, msg):
+        self.log_a.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
 
 
 #=========================================================================
@@ -3145,8 +3554,10 @@ class ROMVisualizerWindow(QMainWindow):
 
         # Current Calculation State
         self.current_U = None
-        self.current_Sigma = None        
+        self.current_Sigma = None
         self.Active_ROM = None
+        self.active_beam_target = None
+        self.auto_tare_on_beam_change = True
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
@@ -3170,7 +3581,7 @@ class ROMVisualizerWindow(QMainWindow):
         input_layout.addWidget(self.StainGauge2Switch, 0, 3)
         
         beam_len = self.geometry.get('Lx', 1.0)
-        self.lbl_pos = QLabel(f"Load Position: {(50/100.0)*beam_len:.2f} m")
+        self.lbl_pos = QLabel(f"Load Position: {(50/100.0)*beam_len*1000.0:.1f} mm")
         input_layout.addWidget(self.lbl_pos, 1, 0)
         
         self.LoadPositionSlider_2 = QSlider(Qt.Orientation.Horizontal)
@@ -3271,7 +3682,7 @@ class ROMVisualizerWindow(QMainWindow):
         sec_ctrl_lay.addSpacing(20)
         
         beam_len = self.geometry.get('Lx', 1.0)
-        self.lbl_sec = QLabel(f"<b>Section Cut (X):</b> {beam_len/2:.2f} m")
+        self.lbl_sec = QLabel(f"<b>Section Cut (X):</b> {beam_len*500.0:.1f} mm")
         self.SectionSlider = QSlider(Qt.Orientation.Horizontal)
         self.SectionSlider.setRange(0, 100); self.SectionSlider.setValue(50)
         sec_ctrl_lay.addWidget(self.lbl_sec); sec_ctrl_lay.addWidget(self.SectionSlider)
@@ -3380,7 +3791,7 @@ class ROMVisualizerWindow(QMainWindow):
 
     def on_slider_change(self, val):
         pos_m = (val / 100.0) * self.geometry.get('Lx', 1.0)
-        self.lbl_pos.setText(f"Load Position: {pos_m:.2f} m")
+        self.lbl_pos.setText(f"Load Position: {pos_m * 1000.0:.1f} mm")
         if self.isSimulating: self.run_DigitalTwin_Update()
 
     def on_force_change(self, val):
@@ -3400,7 +3811,7 @@ class ROMVisualizerWindow(QMainWindow):
 
     def on_section_change(self, val):
         pos_m = (val / 100.0) * self.geometry.get('Lx', 1.0)
-        self.lbl_sec.setText(f"<b>Section Clipping Plane (X-Axis):</b> {pos_m:.2f} m")
+        self.lbl_sec.setText(f"<b>Section Clipping Plane (X-Axis):</b> {pos_m * 1000.0:.1f} mm")
         if self.isSimulating and self.graphics_tabs.currentIndex() == 1:
             self.render_2d_orthographic()
     
@@ -3646,7 +4057,7 @@ class ROMVisualizerWindow(QMainWindow):
         else:
             self.UIAxes_2D_Sec.add_mesh(pv.PolyData(), name='section', reset_camera=False)
 
-        self.UIAxes_2D_Sec.add_text(f"Section Cut (YZ) | X={closest_x:.2f}m", name='txt_sec', font_size=10, color='black')
+        self.UIAxes_2D_Sec.add_text(f"Section Cut (YZ) | X={closest_x * 1000.0:.1f} mm", name='txt_sec', font_size=10, color='black')
 
         # --- INITIALIZE CAMERAS ONLY ONCE ON FIRST RUN ---
         if not hasattr(self, '_2d_cams_initialized'):
@@ -3672,6 +4083,7 @@ class ROMVisualizerWindow(QMainWindow):
         y_top, y_bot = np.max(nodes[:, 1]), np.min(nodes[:, 1])
         y_mid = (y_top + y_bot) / 2.0  # The Neutral Axis
         x_line = np.linspace(0, self.geometry['Lx'], 50)
+        x_line_mm = x_line * 1000.0
         
         defl, s_top, s_bot, s_shear = [], [], [], []
         for x in x_line:
@@ -3691,16 +4103,16 @@ class ROMVisualizerWindow(QMainWindow):
             
             # 3 Rows, 1 Column layout
             self.axL1 = self.line_figure.add_subplot(311)
-            self.l_defl, = self.axL1.plot(x_line, defl, 'b', linewidth=2)
+            self.l_defl, = self.axL1.plot(x_line_mm, defl, 'b', linewidth=2)
             self.axL1.set_title("Deflection (mm)"); self.axL1.grid(True)
             
             self.axL2 = self.line_figure.add_subplot(312)
-            self.l_top, = self.axL2.plot(x_line, s_top, 'r', label='Top Fiber')
-            self.l_bot, = self.axL2.plot(x_line, s_bot, 'g', label='Bottom Fiber')
+            self.l_top, = self.axL2.plot(x_line_mm, s_top, 'r', label='Top Fiber')
+            self.l_bot, = self.axL2.plot(x_line_mm, s_bot, 'g', label='Bottom Fiber')
             self.axL2.set_title("Bending Stress (MPa)"); self.axL2.legend(); self.axL2.grid(True)
 
             self.axL3 = self.line_figure.add_subplot(313)
-            self.l_shear, = self.axL3.plot(x_line, s_shear, 'k', label='Neutral Axis')
+            self.l_shear, = self.axL3.plot(x_line_mm, s_shear, 'k', label='Neutral Axis')
             self.axL3.set_title("Shear Stress (MPa)"); self.axL3.legend(); self.axL3.grid(True)
             
             self.line_figure.tight_layout()
@@ -3739,7 +4151,7 @@ class LiveDigitalTwinWindow(QMainWindow):
     def __init__(self, sensor_manager, dt_bank, geometry, launcher):
         super().__init__()
         self.setWindowTitle("Module 4: Online Digital Twin Monitor")
-        self.setGeometry(100, 100, 1450, 950) # Made slightly wider to fit the top bar
+        self.setGeometry(100, 100, 1450, 950) 
         
         self.sm = sensor_manager
         self.DT_Bank = dt_bank
@@ -3750,6 +4162,8 @@ class LiveDigitalTwinWindow(QMainWindow):
         self.current_U = None
         self.current_Sigma = None
         self.Active_ROM = None
+        self.active_beam_target = None
+        self.auto_tare_on_removeLoad = True
 
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -3812,7 +4226,7 @@ class LiveDigitalTwinWindow(QMainWindow):
         view_lay.addWidget(self.btn_reset_cam)
         top_grid.addWidget(view_grp, 0, 1)
 
-        # --- COLUMN 1, ROW 1: Cyber-Physics Interface (Includes Load, Pos, and SG1-SG3) ---
+        # --- COLUMN 1, ROW 1: Cyber-Physics Interface ---
         in_grp = QGroupBox("Cyber-Physics Interface")
         ProfessionalTheme.apply_professional_panel_style(in_grp)
         in_lay = QHBoxLayout(in_grp)
@@ -3822,7 +4236,6 @@ class LiveDigitalTwinWindow(QMainWindow):
         self.btn_go_live = QPushButton("GO LIVE"); self.btn_go_live.setCheckable(True)
         in_lay.addWidget(self.btn_connect_hw); in_lay.addWidget(self.btn_go_live)
         
-        # Readout Elements
         self.in_Load = QLineEdit("0.0"); self.load_pos_m = QLineEdit("0.0")
         self.in_S1 = QLineEdit("0"); self.in_S2 = QLineEdit("0"); self.in_S3 = QLineEdit("0")
         
@@ -3834,18 +4247,16 @@ class LiveDigitalTwinWindow(QMainWindow):
         in_lay.addWidget(QLabel("SG1(uE):")); in_lay.addWidget(self.in_S1)
         in_lay.addWidget(QLabel("SG2(uE):")); in_lay.addWidget(self.in_S2)
         in_lay.addWidget(QLabel("SG3(uE):")); in_lay.addWidget(self.in_S3)
-
         in_lay.addStretch()
         top_grid.addWidget(in_grp, 1, 1)
 
-        # --- COLUMN 2: Live Predictions (Fixed-Width for Graphic Stability) ---
+        # --- COLUMN 2: Live Predictions ---
         pred_grp = QGroupBox("Live Predictions")
         ProfessionalTheme.apply_professional_panel_style(pred_grp)
         pred_grid = QGridLayout(pred_grp)
         pred_grid.setContentsMargins(8, 4, 8, 4)
         pred_grid.setSpacing(6)
 
-        # 1. Prediction Labels (Fixed width to prevent dashboard jitter)
         self.predict_s1 = QLabel("P1: --")
         self.predict_s2 = QLabel("P2: --")
         self.predict_s3 = QLabel("P3: --")
@@ -3854,35 +4265,23 @@ class LiveDigitalTwinWindow(QMainWindow):
         for lbl in [self.predict_s1, self.predict_s2, self.predict_s3]:
             lbl.setStyleSheet(p_style)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setFixedWidth(110) # Fixed width ensures numbers changing doesn't stretch the UI
-            lbl.setFixedHeight(28)
 
-        # 2. Probe Location Inputs
-        self.pre_s1_loc = QLineEdit("0.001")
-        self.pre_s2_loc = QLineEdit("0.25")
-        self.pre_s3_loc = QLineEdit("0.49")
+        self.pre_s1_loc = QLineEdit("11")
+        self.pre_s2_loc = QLineEdit("257")
+        self.pre_s3_loc = QLineEdit("497")
         
         l_style = "border: 1px solid gray; border-radius: 2px; padding: 2px; background: white; font-weight: bold;"
         for le in [self.pre_s1_loc, self.pre_s2_loc, self.pre_s3_loc]:
-            le.setFixedWidth(40)
-            le.setFixedHeight(22)
-            le.setStyleSheet(l_style)
+            le.setFixedWidth(40); le.setFixedHeight(22); le.setStyleSheet(l_style)
 
-        # 3. FS Status (Compact Column)
         self.lbl_fs_status = QLabel("FS: --")
-        # Reduced padding and min-width to make this column as small as possible
         self.lbl_fs_status.setStyleSheet("font-weight: bold; color: white; background: #2b5797; padding: 2px; border-radius: 4px;")
-        self.lbl_fs_status.setFixedWidth(100) # Smallest readable width
+        self.lbl_fs_status.setFixedWidth(100) 
         self.lbl_fs_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_fs_status.setWordWrap(True) # Allows text to wrap if status is long
+        self.lbl_fs_status.setWordWrap(True) 
 
-        # 4. Grid Arrangement
-        # Col 0: Predictions
-        pred_grid.addWidget(self.predict_s1, 0, 0)
-        pred_grid.addWidget(self.predict_s2, 1, 0)
-        pred_grid.addWidget(self.predict_s3, 2, 0)
+        pred_grid.addWidget(self.predict_s1, 0, 0); pred_grid.addWidget(self.predict_s2, 1, 0); pred_grid.addWidget(self.predict_s3, 2, 0)
 
-        # Col 1 & 2: Probe Locations (Compact labels)
         style_label = "font-size: 8pt; font-weight: bold;"
         l1 = QLabel("L1:mm"); l1.setStyleSheet(style_label)
         l2 = QLabel("L2:mm"); l2.setStyleSheet(style_label)
@@ -3891,21 +4290,11 @@ class LiveDigitalTwinWindow(QMainWindow):
         pred_grid.addWidget(l1, 0, 1); pred_grid.addWidget(self.pre_s1_loc, 0, 2)
         pred_grid.addWidget(l2, 1, 1); pred_grid.addWidget(self.pre_s2_loc, 1, 2)
         pred_grid.addWidget(l3, 2, 1); pred_grid.addWidget(self.pre_s3_loc, 2, 2)
-
-        # Col 3: FS Status (Spans 3 rows, very narrow)
         pred_grid.addWidget(self.lbl_fs_status, 0, 3, 3, 1)
 
-        # 5. Column Streching for Internal Grid
-        pred_grid.setColumnStretch(0, 0) # Lock size
-        pred_grid.setColumnStretch(1, 0) # Lock size
-        pred_grid.setColumnStretch(2, 0) # Lock size
-        pred_grid.setColumnStretch(3, 0) # Lock size: Makes FS column minimal
-
+        pred_grid.setColumnStretch(0, 0); pred_grid.setColumnStretch(1, 0); pred_grid.setColumnStretch(2, 0); pred_grid.setColumnStretch(3, 0)
         top_grid.addWidget(pred_grp, 0, 2, 2, 1)
-
-        # Dashboard Column Stretch
-        top_grid.setColumnStretch(1, 1) # Control column
-        top_grid.setColumnStretch(2, 0) # Prediction column stays at minimum size
+        top_grid.setColumnStretch(1, 1); top_grid.setColumnStretch(2, 1) 
         self.main_layout.addWidget(top_container)
 
         # =================================================================
@@ -3918,29 +4307,39 @@ class LiveDigitalTwinWindow(QMainWindow):
         self.tab_3d = QWidget(); layout_3d = QVBoxLayout(self.tab_3d)
         self.UIAxes_3D = QtInteractor(); layout_3d.addWidget(self.UIAxes_3D)
         self.graphics_tabs.addTab(self.tab_3d, "3D Isometric View")
+
+        # Tab B: 2D Push-Button Views
+        self.tab_2d = QWidget()
+        layout_2d = QVBoxLayout(self.tab_2d)
         
-        # Tab B: 2D Orthographic (Restored 3-Subplot Arrangement)
-        self.tab_2d = QWidget(); layout_2d = QVBoxLayout(self.tab_2d)
+        btn_nav_layout = QHBoxLayout()
+        self.btn_show_front = QPushButton("🎞️ Front View (XZ)")
+        self.btn_show_top = QPushButton("📐 Top View (XY)")
+        self.btn_show_sec = QPushButton("✂️ Section Cut (YZ)")
+        for b in [self.btn_show_front, self.btn_show_top, self.btn_show_sec]:
+            b.setCheckable(True); btn_nav_layout.addWidget(b)
+            
+        layout_2d.addLayout(btn_nav_layout)
+
         sec_ctrl = QHBoxLayout()
         self.TopSliceCombo = QComboBox(); self.TopSliceCombo.addItems(["Top", "Axis", "Bottom"])
         self.ViewSectionSlider = QSlider(Qt.Orientation.Horizontal); self.ViewSectionSlider.setRange(0, 100); self.ViewSectionSlider.setValue(50)
-        self.lbl_sec = QLabel(f"Section Cut (X): {self.geometry.get('Lx',1.0)/2:.2f} m")
-        sec_ctrl.addWidget(QLabel("Slice:")); sec_ctrl.addWidget(self.TopSliceCombo); sec_ctrl.addSpacing(20); sec_ctrl.addWidget(self.lbl_sec); sec_ctrl.addWidget(self.ViewSectionSlider)
+        self.lbl_sec = QLabel(f"Section Cut (X): -- mm")
+        sec_ctrl.addWidget(QLabel("Slice Layer:")); sec_ctrl.addWidget(self.TopSliceCombo); sec_ctrl.addSpacing(20); sec_ctrl.addWidget(self.lbl_sec); sec_ctrl.addWidget(self.ViewSectionSlider)
         layout_2d.addLayout(sec_ctrl)
 
-        def wrap(interactor):
-            f = QFrame(); f.setStyleSheet("QFrame { border: 2px solid #7f8c8d; border-radius: 4px; background: white; }")
-            l = QVBoxLayout(f); l.setContentsMargins(2,2,2,2); l.addWidget(interactor); return f
-
-        self.UIAxes_2D_Front = QtInteractor(); self.UIAxes_2D_Top = QtInteractor(); self.UIAxes_2D_Sec = QtInteractor()
-        g2d = QGridLayout(); g2d.setSpacing(10)
-        g2d.addWidget(wrap(self.UIAxes_2D_Front), 0, 0, 2, 3) 
-        g2d.addWidget(wrap(self.UIAxes_2D_Top), 2, 0, 1, 2)
-        g2d.addWidget(wrap(self.UIAxes_2D_Sec), 2, 2, 1, 1)
-        layout_2d.addLayout(g2d)
+        self.ortho_sub_stack = QStackedWidget()
+        self.UIAxes_2D_Front = QtInteractor()
+        self.UIAxes_2D_Top = QtInteractor()
+        self.UIAxes_2D_Sec = QtInteractor()
+        self.ortho_sub_stack.addWidget(self.UIAxes_2D_Front)
+        self.ortho_sub_stack.addWidget(self.UIAxes_2D_Top)
+        self.ortho_sub_stack.addWidget(self.UIAxes_2D_Sec)
+        layout_2d.addWidget(self.ortho_sub_stack)
         self.graphics_tabs.addTab(self.tab_2d, "2D Orthographic Views")
         main_splitter.addWidget(self.graphics_tabs)
 
+        # Tab C: Line Plots
         plots_panel = QWidget(); plots_lay = QVBoxLayout(plots_panel)
         self.line_figure = Figure(figsize=(4, 6), tight_layout=True); self.line_canvas = FigureCanvas(self.line_figure)
         plots_lay.addWidget(self.line_canvas); main_splitter.addWidget(plots_panel)
@@ -3949,14 +4348,22 @@ class LiveDigitalTwinWindow(QMainWindow):
         self.main_layout.addWidget(main_splitter, 1)
 
         # --- Re-attach Signals ---
+        self.btn_show_front.clicked.connect(lambda: [self.ortho_sub_stack.setCurrentIndex(0), self.update_nav_buttons(0)])
+        self.btn_show_top.clicked.connect(lambda: [self.ortho_sub_stack.setCurrentIndex(1), self.update_nav_buttons(1)])
+        self.btn_show_sec.clicked.connect(lambda: [self.ortho_sub_stack.setCurrentIndex(2), self.update_nav_buttons(2)])
+        
         self.btn_connect_hw.clicked.connect(self.attempt_connect)
         self.btn_go_live.toggled.connect(self.toggle_live_feed)
         self.ViewSectionSlider.valueChanged.connect(self.on_section_change)
         self.AutoColorLimitSwitch.stateChanged.connect(self.toggle_color_limits)
         self.btn_apply_color.clicked.connect(self.update_visuals_only)
         self.btn_reset_cam.clicked.connect(self.reset_camera_view)
+        
         for w in [self.PrimaryModeCombo, self.FailDisplayCombo, self.FailMethodCombo, self.StressTypeCombo]:
             w.currentTextChanged.connect(self.update_visuals_only)
+            
+        self.graphics_tabs.currentChanged.connect(self.update_visuals_only)
+        self.update_nav_buttons(0) 
 
     # =================================================================
     # UI LOGIC & HARDWARE THREADING
@@ -3981,10 +4388,6 @@ class LiveDigitalTwinWindow(QMainWindow):
         print(f"Hardware Thread Error:\n{err_msg}")
         self.btn_go_live.setChecked(False)
 
-    def switch_render_options(self, index):
-        self.options_stack.setCurrentIndex(index)
-        self.update_visuals_only()
-
     def toggle_color_limits(self):
         is_auto = self.AutoColorLimitSwitch.isChecked()
         self.CMinEdit.setEnabled(not is_auto); self.CMaxEdit.setEnabled(not is_auto)
@@ -3993,108 +4396,160 @@ class LiveDigitalTwinWindow(QMainWindow):
 
     def on_section_change(self, val):
         pos_m = (val / 100.0) * self.geometry['Lx']
-        self.lbl_sec.setText(f"<b>View Section Cut (X):</b> {pos_m:.2f} m")
+        self.lbl_sec.setText(f"Section Cut (X): {pos_m * 1000.0:.1f} mm")
         if self.graphics_tabs.currentIndex() == 1: self.update_visuals_only()
 
     def reset_camera_view(self):
+        """Forces all active PyVista cameras into their unique engineered alignments."""
         if hasattr(self, 'UIAxes_3D'):
-            self.UIAxes_3D.view_isometric(); self.UIAxes_3D.reset_camera(); self.UIAxes_3D.render()
+            # Custom Isometric View: Look from -X, +Y, -Z towards the origin
+            # view_vector is the direction the camera points. 
+            self.UIAxes_3D.view_vector(vector=(-1.0, 1.0, -1.0), viewup=(0.0, 0.0, -1.0))
+            self.UIAxes_3D.reset_camera()
+            self.UIAxes_3D.render()
+
+        # Setup strict parallel orthographic planes for 2D sub-widgets
         if hasattr(self, 'UIAxes_2D_Top'):
             self.UIAxes_2D_Top.view_xy(negative=("Bottom" in self.TopSliceCombo.currentText()))
             self.UIAxes_2D_Top.camera.parallel_projection = True
             self.UIAxes_2D_Top.reset_camera(); self.UIAxes_2D_Top.render()
+
         if hasattr(self, 'UIAxes_2D_Front'):
-            self.UIAxes_2D_Front.view_xz(); self.UIAxes_2D_Front.camera.parallel_projection = True
+            self.UIAxes_2D_Front.view_xz()
+            self.UIAxes_2D_Front.camera.up = (0, -1, 1)
+            self.UIAxes_2D_Front.camera.parallel_projection = True
             self.UIAxes_2D_Front.reset_camera(); self.UIAxes_2D_Front.render()
+
         if hasattr(self, 'UIAxes_2D_Sec'):
-            self.UIAxes_2D_Sec.view_yz(); self.UIAxes_2D_Sec.camera.parallel_projection = True
+            self.UIAxes_2D_Sec.view_yz()
+            self.UIAxes_2D_Sec.camera.parallel_projection = True
             self.UIAxes_2D_Sec.reset_camera(); self.UIAxes_2D_Sec.render()
+
+    def update_nav_buttons(self, active_idx):
+        buttons = [self.btn_show_front, self.btn_show_top, self.btn_show_sec]
+        for i, btn in enumerate(buttons):
+            btn.setChecked(i == active_idx)
+            btn.setStyleSheet(
+                "background-color: #2980b9; color: white; font-weight: bold;" if i == active_idx 
+                else "background-color: #ecf0f1; color: #2c3e50;"
+            )
+        self.update_visuals_only()
 
     # =================================================================
     # REAL-TIME MATH (Triggered by Hardware Thread)
     # =================================================================
+    def ensure_live_calibration_state(self):
+        if not hasattr(self, 'active_beam_target'): self.active_beam_target = None
+        if not hasattr(self, 'auto_tare_on_removeLoad'): self.auto_tare_on_removeLoad = True
+
     def process_live_data(self, strains, force_n, p_mm):
-        if self._is_rendering: return 
+        if self._is_rendering: return  
         self._is_rendering = True
         
         try:
-            # 1. Update Input Box Text
+            self.ensure_live_calibration_state()
+            
+            # Update Hardware Readout Strings
             self.in_Load.setText(f"{force_n:.1f}")
             self.in_S1.setText(f"{strains[0]:.1f}")
             self.in_S2.setText(f"{strains[1]:.1f}")
             self.in_S3.setText(f"{strains[2]:.1f}")
             self.load_pos_m.setText(f"{p_mm:.1f}")
 
-            # 2. Logic & ROM Selection
-            strains_array = np.array(strains)
-            target = 'Fix' if (abs(strains[0]) > abs(strains[1]) or abs(strains[2]) > abs(strains[1])) else ('Simply' if np.argmax(np.abs(strains_array)) == 1 else 'Cant')
+            # --- RULE 3: CHECK IF LOAD IS OFF (Triggers Auto-Tare & Aborts Classification) ---
+            if abs(force_n) < 0.5:  
+                raw = np.asarray(getattr(self.sm, 'live_raw', []), dtype=float)
+                if raw.size >= 5:
+                    self.sm.strain_tare_bits[:3] = raw[:3]
+                    self.sm.strain_zero_bits = raw[1]
+                    self.sm.load_tare = raw[3]
+                
+                self.predict_s1.setText("P1: 0.0 uE")
+                self.predict_s2.setText("P2: 0.0 uE")
+                self.predict_s3.setText("P3: 0.0 uE")
+                
+                self.in_Load.setText("0.0")
+                self.in_S1.setText("0.0")
+                self.in_S2.setText("0.0")
+                self.in_S3.setText("0.0")
+                
+                self.lbl_fs_status.setText("Unladen: System & Load Cell Zeroed")
+                self.lbl_fs_status.setStyleSheet("font-size: 11pt; font-weight: bold; background: #34495e; color: white; padding: 10px; border-radius: 6px;")
+                
+                self.UIAxes_3D.clear()
+                self._is_rendering = False
+                return  
+
+            # --- RULE 2: BEAM CLASSIFICATION IS DRIVEN STRICTLY BY ACTIVE SENSOR DATA ---
+            strains_array = np.array(strains, dtype=float)
+            strain_signs = np.sign(strains_array)
+            s1_opposes_s2 = strain_signs[0] != 0 and strain_signs[1] != 0 and strain_signs[0] != strain_signs[1]
+            s3_opposes_s2 = strain_signs[2] != 0 and strain_signs[1] != 0 and strain_signs[2] != strain_signs[1]
+            all_same_sign = np.all(strain_signs != 0) and np.all(strain_signs == strain_signs[0])
+
+            if s1_opposes_s2 and s3_opposes_s2: target = 'Fix'
+            elif all_same_sign and np.argmax(np.abs(strains_array)) == 1: target = 'Simply'
+            else: target = 'Cant'
+
+            self.active_beam_target = target
             self.Active_ROM = next((r for r in self.DT_Bank if target.lower() in r['Label'].lower()), self.DT_Bank[0])
 
-            # 3. Inject Data to Offline Studio
             self.launcher.offline_studio.node_coords = self.Active_ROM['Nodes']
             self.launcher.offline_studio.element_type = self.Active_ROM['ElementType']
             if 'Connectivity' in self.Active_ROM: self.launcher.offline_studio.element_connectivity = self.Active_ROM['Connectivity']
             else:
-                self.hw_worker.stop(); self.btn_go_live.setChecked(False)
-                print("CRITICAL: ROM missing Connectivity. Re-save in Module 1.")
+                self.btn_go_live.setChecked(False)
                 return
 
-            # 4. Math Projection
+            # --- Physics Projection Engine ---
             Lx = self.geometry['Lx']
             load_pos_m = max(0, min(p_mm / 1000.0, Lx))
-            
             temp_loads = self.launcher.offline_studio.define_loads_at_pos(load_pos_m, force_n)
-            num_nodes = self.Active_ROM['NumNodes']; F_temp = np.zeros(num_nodes * 3)
+            num_nodes = self.Active_ROM['NumNodes']
+            F_temp = np.zeros(num_nodes * 3)
             for j in range(len(temp_loads['point_nodes'])):
-                node_id = temp_loads['point_nodes'][j]; force_vec = temp_loads['point_load_values'][:, j]
+                node_id = temp_loads['point_nodes'][j]
+                force_vec = temp_loads['point_load_values'][:, j]
                 F_temp[node_id*3 : node_id*3+3] += force_vec
             
             active_free_dofs = self.Active_ROM['bc_info']['free_dofs_indices']
             F_red = F_temp[active_free_dofs]
             alpha = np.linalg.solve(self.Active_ROM['K_rom'], self.Active_ROM['Phi'].T @ F_red)
             
-            self.current_U = np.zeros(num_nodes * 3); self.current_U[active_free_dofs] = self.Active_ROM['Phi'] @ alpha
+            self.current_U = np.zeros(num_nodes * 3)
+            self.current_U[active_free_dofs] = self.Active_ROM['Phi'] @ alpha
             self.current_Sigma = (self.Active_ROM['Phi_stress'] @ alpha).reshape((num_nodes, 6))
 
-            # 5. Update Output Box (Predictions)
+            # --- Validation Metrics Generation ---
             nodes = self.Active_ROM['Nodes']
-            loc_1= float(self.pre_s1_loc.text().strip())/1000.0
-            loc_2= float(self.pre_s2_loc.text().strip())/1000.0
-            loc_3= float(self.pre_s3_loc.text().strip())/1000.0
-            # sensor is install at the lower fiber layer, so we look for nodes near the bottom (minz) at specified x locations
-            tol_x = Lx * 0.02  # 2% tolerance for x-coordinate matching
+            tol_x = Lx * 0.02  
             
-            # Parse user-input locations, use defaults if invalid
-            try: x_loc_1 = float(loc_1)
+            try: x_loc_1 = float(self.pre_s1_loc.text().strip()) / 1000.0
             except: x_loc_1 = Lx * 0.25
-            try: x_loc_2 = float(loc_2)
+            try: x_loc_2 = float(self.pre_s2_loc.text().strip()) / 1000.0
             except: x_loc_2 = Lx * 0.50
-            try: x_loc_3 = float(loc_3)
+            try: x_loc_3 = float(self.pre_s3_loc.text().strip()) / 1000.0
             except: x_loc_3 = Lx * 0.75
             
-            # Find nodes near x=x_loc_1 with minimum z (lower fiber layer)
             mask_s1 = np.abs(nodes[:,0] - x_loc_1) < tol_x
             idx_s1 = np.where(mask_s1)[0][np.argmin(nodes[mask_s1, 2])] if np.any(mask_s1) else np.argmin(np.abs(nodes[:,0] - x_loc_1))
-            
-            # Find nodes near x=x_loc_2 with minimum z (lower fiber layer)
             mask_s2 = np.abs(nodes[:,0] - x_loc_2) < tol_x
             idx_s2 = np.where(mask_s2)[0][np.argmin(nodes[mask_s2, 2])] if np.any(mask_s2) else np.argmin(np.abs(nodes[:,0] - x_loc_2))
-            
-            # Find nodes near x=x_loc_3 with minimum z (lower fiber layer)
             mask_s3 = np.abs(nodes[:,0] - x_loc_3) < tol_x
             idx_s3 = np.where(mask_s3)[0][np.argmin(nodes[mask_s3, 2])] if np.any(mask_s3) else np.argmin(np.abs(nodes[:,0] - x_loc_3))
             
-            p1 = self.current_Sigma[idx_s1, 0] / self.launcher.offline_studio.material['E'] * 1e6
-            p2 = self.current_Sigma[idx_s2, 0] / self.launcher.offline_studio.material['E'] * 1e6
-            p3 = self.current_Sigma[idx_s3, 0] / self.launcher.offline_studio.material['E'] * 1e6
+            E_mod = self.launcher.offline_studio.material['E']
+            p1 = (self.current_Sigma[idx_s1, 0] / E_mod) * 1e6
+            p2 = (self.current_Sigma[idx_s2, 0] / E_mod) * 1e6
+            p3 = (self.current_Sigma[idx_s3, 0] / E_mod) * 1e6
             
-            e1 = abs(p1 - strains[0]) / max(abs(strains[0]), 1e-5) * 100
-            e2 = abs(p2 - strains[1]) / max(abs(strains[1]), 1e-5) * 100
-            e3 = abs(p3 - strains[2]) / max(abs(strains[2]), 1e-5) * 100
+            e1 = (abs(p1 - strains[0]) / max(abs(strains[0]), 1e-5)) * 100
+            e2 = (abs(p2 - strains[1]) / max(abs(strains[1]), 1e-5)) * 100
+            e3 = (abs(p3 - strains[2]) / max(abs(strains[2]), 1e-5)) * 100
             
-            self.predict_s1.setText(f" {p1:.1f} uE (Err:{e1:.1f}%)")
-            self.predict_s2.setText(f" {p2:.1f} uE (Err:{e2:.1f}%)")
-            self.predict_s3.setText(f" {p3:.1f} uE (Err:{e3:.1f}%)")
+            self.predict_s1.setText(f"{p1:.1f} uE (Err:{e1:.1f}%)")
+            self.predict_s2.setText(f"{p2:.1f} uE (Err:{e2:.1f}%)")
+            self.predict_s3.setText(f"{p3:.1f} uE (Err:{e3:.1f}%)")
             
             try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
             except: yield_strength = 250.0
@@ -4103,17 +4558,17 @@ class LiveDigitalTwinWindow(QMainWindow):
             fs = yield_strength / max(np.max(vm)/1e6, 1e-9) 
             
             if fs < 1.0:
-                self.lbl_fs_status.setText("⚠️ FAILURE RISK ⚠️"); 
-                self.lbl_fs_status.setStyleSheet(f"font-size: 12pt; font-weight: bold; background: {ProfessionalTheme.ERROR_RED}; color: white; padding: 10px; border-radius: 6px; border: 2px solid #8B0000;")
+                self.lbl_fs_status.setText("⚠️ FAILURE RISK ⚠️")
+                self.lbl_fs_status.setStyleSheet(f"font-size: 11pt; font-weight: bold; background: {ProfessionalTheme.ERROR_RED}; color: white; padding: 10px; border-radius: 6px;")
             else:
-                self.lbl_fs_status.setText(f"✓ FS: {fs:.2f} | SAFE"); 
-                self.lbl_fs_status.setStyleSheet(f"font-size: 12pt; font-weight: bold; background: {ProfessionalTheme.SUCCESS_GREEN}; color: white; padding: 10px; border-radius: 6px; border: 2px solid {ProfessionalTheme.HOVER_GREEN};")
+                self.lbl_fs_status.setText(f"✓ FS: {fs:.2f} | SAFE")
+                self.lbl_fs_status.setStyleSheet(f"font-size: 11pt; font-weight: bold; background: {ProfessionalTheme.SUCCESS_GREEN}; color: white; padding: 10px; border-radius: 6px;")
 
             self._update_graphics()
 
         except Exception as e:
-            self.hw_worker.stop(); self.btn_go_live.setChecked(False)
             print(traceback.format_exc())
+            self.btn_go_live.setChecked(False)
         finally:
             self._is_rendering = False
 
@@ -4121,38 +4576,11 @@ class LiveDigitalTwinWindow(QMainWindow):
     # GRAPHICS RENDERING ENGINE
     # =================================================================
     def update_visuals_only(self, *args):
-        if self.current_U is None: return
+        if self.current_U is None or self.current_Sigma is None: return
         if self._is_rendering: return
         self._is_rendering = True
         try: self._update_graphics()
         finally: self._is_rendering = False
-
-    def _update_graphics(self):
-        mode = self.PrimaryModeCombo.currentText()
-        try: sf = float(self.ScaleFactorEditField_2.text())
-        except: sf = 500.0 
-        try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
-        except: yield_strength = 250.0 
-
-        if self.AutoColorLimitSwitch.isChecked(): custom_clim = None
-        else:
-            try: c_min = float(self.CMinEdit.text())
-            except: c_min = -250.0
-            try: c_max = float(self.CMaxEdit.text())
-            except: c_max = 250.0
-            if c_min == c_max: c_max = c_min + 1e-6
-            custom_clim = [c_min, c_max]
-
-        if self.graphics_tabs.currentIndex() == 0:
-            if mode == "Stress": self.launcher.offline_studio.plot_stresses(self.current_Sigma, self.StressTypeCombo.currentText(), self.UIAxes_3D, self.current_U, sf, custom_clim=custom_clim)
-            else: self.launcher.offline_studio.plot_FS(self.FailMethodCombo.currentText(), yield_strength, self.UIAxes_3D, self.current_Sigma, self.current_U, sf, self.FailDisplayCombo.currentText(), custom_clim=custom_clim)
-            self.UIAxes_3D.add_text(f"Live Twin Active: {self.Active_ROM['Label']}", name="live_lbl", position='upper_right', color='red')
-            self.UIAxes_3D.update()
-
-        elif self.graphics_tabs.currentIndex() == 1:
-            self.render_2d_orthographic(custom_clim)
-
-        self.render_line_plots()
 
     def get_plot_scalars(self):
         mode = self.PrimaryModeCombo.currentText()
@@ -4184,90 +4612,148 @@ class LiveDigitalTwinWindow(QMainWindow):
                 except: yield_strength = 250.0 
                 return yield_strength / np.maximum(val, 1e-6), "jet_r", "Factor of Safety"
 
-    def render_2d_orthographic(self, custom_clim=None):
-        if self.current_U is None: return
-        scalars, cmap ,plot_name = self.get_plot_scalars()
-        try: sf = float(self.ScaleFactorEditField_2.text())
-        except: sf = 500.0
-
-        nodes = self.Active_ROM['Nodes']
-        U_nodes = self.current_U.reshape(-1, 3)
-        def_coords = nodes + (U_nodes * sf)
-
-        if custom_clim is not None:
-            c_limits = custom_clim
-        else:
-            s_min, s_max = np.min(scalars), np.max(scalars)
-            if s_min == s_max: s_max = s_min + 1e-6
-            c_limits = [s_min, s_max]
+    def _update_graphics(self):
+        # 1. Safety Check
+        if self.Active_ROM is None or self.current_U is None or self.current_Sigma is None:
+            return
             
-        sargs_horiz = dict(title_font_size=10, label_font_size=8, shadow=False, n_labels=3, fmt="%.1f", vertical=False, position_x=0.05, position_y=0.02, width=0.9, height=0.08)
-        sargs_vert = dict(title_font_size=10, label_font_size=8, shadow=False, n_labels=3, fmt="%.1f", vertical=True, position_x=0.88, position_y=0.05, width=0.08, height=0.85)
-
-        for ax in [self.UIAxes_2D_Top, self.UIAxes_2D_Front, self.UIAxes_2D_Sec]:
-            try: ax.clear_scalar_bars()
-            except:
-                for key in list(ax.scalar_bars.keys()): ax.remove_scalar_bar(key)
-
-        # 1. Top View (Static Undeformed)
-        z_max, z_min = np.max(nodes[:, 2]), np.min(nodes[:, 2])
-        top_choice = self.TopSliceCombo.currentText()
-        if "Top" in top_choice: target_z = z_max
-        elif "Bottom" in top_choice: target_z = z_min
-        else: target_z = (z_max + z_min) / 2.0
+        mode = self.PrimaryModeCombo.currentText()
+        try: sf = float(self.ScaleFactorEditField_2.text())
+        except: sf = 500.0 
         
-        idx_top = np.where(np.abs(nodes[:, 2] - target_z) < 1e-4)[0]
-        if len(idx_top) > 0:
-            surf_top = pv.PolyData(nodes[idx_top]).delaunay_2d()
-            surf_top[plot_name] = scalars[idx_top]
-            self.UIAxes_2D_Top.add_mesh(surf_top, name='top', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=0.5, scalar_bar_args=sargs_horiz, reset_camera=False)
-        else: self.UIAxes_2D_Top.add_mesh(pv.PolyData(), name='top', reset_camera=False)
-
-        self.UIAxes_2D_Top.add_text(f"Top View (XY) | Layer: {top_choice}", name='txt_top', font_size=10, color='black')
+        # --- COORDINATE MAPPING (New = -Y, Y=X, Z=-Z) ---
+        nodes = self.Active_ROM['Nodes']
+        nodes_mapped = np.zeros_like(nodes)
+        nodes_mapped[:, 0] = -nodes[:, 1]
+        nodes_mapped[:, 1] = nodes[:, 0]
+        nodes_mapped[:, 2] = -nodes[:, 2]
         
-        cam_front = self.UIAxes_2D_Front.camera_position if hasattr(self, '_2d_cams_initialized') else None
-        if 'Hexa' in self.launcher.offline_studio.element_type: n_vis = 8; vtk_type = pv.CellType.HEXAHEDRON
-        else: n_vis = 4; vtk_type = pv.CellType.TETRA
-        cells_dict = {vtk_type: self.launcher.offline_studio.element_connectivity[:, :n_vis]}
-        grid_deformed = pv.UnstructuredGrid(cells_dict, def_coords)
-        grid_deformed.point_data[plot_name] = scalars
-
-        y_cut = (grid_deformed.bounds[2] + grid_deformed.bounds[3]) / 2.0 
-        try:
-            front_slice = grid_deformed.slice(normal='y', origin=(0, y_cut, 0))
-            self.UIAxes_2D_Front.add_mesh(front_slice, name='front', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=1.5, scalar_bar_args=sargs_vert, reset_camera=False)
-        except: self.UIAxes_2D_Front.add_mesh(pv.PolyData(), name='front', reset_camera=False)
-        self.UIAxes_2D_Front.add_text("Front View (XZ) | Deformed Axis Slice", name='txt_front', font_size=10, color='black')
-        if cam_front is not None: self.UIAxes_2D_Front.camera_position = cam_front
-
-        # 3. Section View (Static Undeformed)
-        cut_x = (self.ViewSectionSlider.value() / 100.0) * self.geometry['Lx']
-        unique_x = np.unique(np.round(nodes[:, 0], decimals=4))
-        closest_x = unique_x[np.argmin(np.abs(unique_x - cut_x))]
-        idx_sec = np.where(np.abs(nodes[:, 0] - closest_x) < 1e-4)[0]
+        U_nodes = self.current_U.reshape(-1, 3)
+        U_mapped = np.zeros_like(U_nodes)
+        U_mapped[:, 0] = -U_nodes[:, 1]
+        U_mapped[:, 1] = U_nodes[:, 0]
+        U_mapped[:, 2] = -U_nodes[:, 2]
         
-        if len(idx_sec) > 0:
-            pts_yz = nodes[idx_sec].copy(); pts_yz[:, 0] = 0 
-            surf_sec = pv.PolyData(pts_yz).delaunay_2d(); surf_sec.points[:, 0] = nodes[idx_sec, 0] 
-            surf_sec[plot_name] = scalars[idx_sec]
-            self.UIAxes_2D_Sec.add_mesh(surf_sec, name='section', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=0.5, scalar_bar_args=sargs_horiz, reset_camera=False)
-        else: self.UIAxes_2D_Sec.add_mesh(pv.PolyData(), name='section', reset_camera=False)
-        self.UIAxes_2D_Sec.add_text(f"Section Cut (YZ) | X={closest_x:.2f}m", name='txt_sec', font_size=10, color='black')
+        def_coords = nodes_mapped + (U_mapped * sf)
+        # --------------------------------------------------
 
-        if not hasattr(self, '_2d_cams_initialized'):
-            self.UIAxes_2D_Top.view_xy(negative=("Bottom" in top_choice)); self.UIAxes_2D_Top.camera.parallel_projection = True
-            self.UIAxes_2D_Front.view_xz(); self.UIAxes_2D_Front.camera.parallel_projection = True
-            self.UIAxes_2D_Sec.view_yz(); self.UIAxes_2D_Sec.camera.parallel_projection = True
-            self.reset_camera_view()
-            self._2d_cams_initialized = True
+        if self.AutoColorLimitSwitch.isChecked(): custom_clim = None
+        else:
+            try: 
+                c_min, c_max = float(self.CMinEdit.text()), float(self.CMaxEdit.text())
+                custom_clim = [c_min, c_max] if c_min != c_max else [c_min, c_min + 1e-6]
+            except: custom_clim = None
 
-        self.UIAxes_2D_Top.render(); self.UIAxes_2D_Front.render(); self.UIAxes_2D_Sec.render()
+        # 2. RENDER 3D TAB (Remains Full Volume)
+        if self.graphics_tabs.currentIndex() == 0:
+            if mode == "Stress": 
+                self.launcher.offline_studio.plot_stresses(self.current_Sigma, self.StressTypeCombo.currentText(), self.UIAxes_3D, self.current_U, sf, custom_clim=custom_clim)
+            else: 
+                self.launcher.offline_studio.plot_FS(self.FailMethodCombo.currentText(), float(self.launcher.offline_studio.YieldStrengthMpaEditField.text() or 250), 
+                                                      self.UIAxes_3D, self.current_Sigma, self.current_U, sf, self.FailDisplayCombo.currentText(), custom_clim=custom_clim)
+            self.UIAxes_3D.add_text(f"Live Twin Active: {self.Active_ROM['Label']}", name="live_lbl", position='upper_right', color='red')
+            self.UIAxes_3D.update()
+
+        # 3. RENDER 2D ORTHOGRAPHIC TAB (Lightweight Mode)
+        elif self.graphics_tabs.currentIndex() == 1:
+            scalars, cmap, plot_name = self.get_plot_scalars()
+            c_limits = custom_clim if custom_clim else [np.min(scalars), np.max(scalars) + 1e-6]
+            
+            sargs_horiz = dict(title_font_size=10, label_font_size=8, shadow=False, n_labels=3, fmt="%.1f", vertical=False, position_x=0.05, position_y=0.02, width=0.9, height=0.08)
+            sargs_vert = dict(title_font_size=10, label_font_size=8, shadow=False, n_labels=3, fmt="%.1f", vertical=True, position_x=0.88, position_y=0.05, width=0.08, height=0.85)
+
+            active_view_idx = self.ortho_sub_stack.currentIndex()
+
+            # Front View (XZ Plane) - LIGHTWEIGHT SLICE
+            if active_view_idx == 0:
+                cam_front = self.UIAxes_2D_Front.camera_position if hasattr(self, '_2d_cams_initialized') else None
+                try: self.UIAxes_2D_Front.clear_scalar_bars()
+                except: pass
+                
+                # Find nodes strictly near the Y-centerline (Neutral Axis)
+                y_center = (np.max(nodes_mapped[:, 1]) + np.min(nodes_mapped[:, 1])) / 2.0
+                idx_front = np.where(np.abs(nodes_mapped[:, 1] - y_center) < 1e-3)[0]
+                
+                if len(idx_front) > 0:
+                    # Render ONLY the nodes on this plane as a 2D Delaunay mesh, skipping 3D volume slicing
+                    pts_xz = def_coords[idx_front].copy()
+                    pts_xz[:, 1] = 0  # Flatten to XZ plane mathematically for reliable triangulation
+                    
+                    try:
+                        surf_front = pv.PolyData(pts_xz).delaunay_2d()
+                        # Restore the actual Y coordinate to maintain spatial truth
+                        surf_front.points[:, 1] = def_coords[idx_front, 1]
+                        surf_front[plot_name] = scalars[idx_front]
+                        
+                        self.UIAxes_2D_Front.add_mesh(surf_front, name='front', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=False, edge_color='black', line_width=1.5, scalar_bar_args=sargs_vert, reset_camera=False)
+                    except:
+                        # Fallback to point cloud if triangulation fails (super fast)
+                        pc = pv.PolyData(def_coords[idx_front])
+                        pc[plot_name] = scalars[idx_front]
+                        self.UIAxes_2D_Front.add_mesh(pc, name='front', scalars=plot_name, cmap=cmap, clim=c_limits, render_points_as_spheres=True, point_size=5, scalar_bar_args=sargs_vert, reset_camera=False)
+                else:
+                    self.UIAxes_2D_Front.add_mesh(pv.PolyData(), name='front', reset_camera=False)
+
+                self.UIAxes_2D_Front.add_text("Front View (XZ) | Deformed Axis Slice", name='txt_front', font_size=10, color='black')
+                if cam_front is not None: self.UIAxes_2D_Front.camera_position = cam_front
+                self.UIAxes_2D_Front.render()
+
+            # Top View (XY plane) - LIGHTWEIGHT EXTRACTION
+            elif active_view_idx == 1:
+                try: self.UIAxes_2D_Top.clear_scalar_bars()
+                except: pass
+                z_max, z_min = np.max(nodes_mapped[:, 2]), np.min(nodes_mapped[:, 2])
+                top_choice = self.TopSliceCombo.currentText()
+                if "Top" in top_choice: target_z = z_max
+                elif "Bottom" in top_choice: target_z = z_min
+                else: target_z = (z_max + z_min) / 2.0
+                
+                idx_top = np.where(np.abs(nodes_mapped[:, 2] - target_z) < 1e-4)[0]
+                if len(idx_top) > 0:
+                    surf_top = pv.PolyData(nodes_mapped[idx_top]).delaunay_2d()
+                    surf_top[plot_name] = scalars[idx_top]
+                    self.UIAxes_2D_Top.add_mesh(surf_top, name='top', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=False, edge_color='black', line_width=0.5, scalar_bar_args=sargs_horiz, reset_camera=False)
+                else: 
+                    self.UIAxes_2D_Top.add_mesh(pv.PolyData(), name='top', reset_camera=False)
+
+                self.UIAxes_2D_Top.add_text(f"Top View (XY) | Layer: {top_choice}", name='txt_top', font_size=10, color='black')
+                self.UIAxes_2D_Top.render()
+
+            # Section View (YZ plane) - LIGHTWEIGHT EXTRACTION
+            elif active_view_idx == 2:
+                try: self.UIAxes_2D_Sec.clear_scalar_bars()
+                except: pass
+                cut_x = (self.ViewSectionSlider.value() / 100.0) * self.geometry['Lx']
+                unique_x = np.unique(np.round(nodes_mapped[:, 0], decimals=4))
+                closest_x = unique_x[np.argmin(np.abs(unique_x - cut_x))]
+                idx_sec = np.where(np.abs(nodes_mapped[:, 0] - closest_x) < 1e-4)[0]
+                
+                if len(idx_sec) > 0:
+                    pts_yz = nodes_mapped[idx_sec].copy(); pts_yz[:, 0] = 0 
+                    surf_sec = pv.PolyData(pts_yz).delaunay_2d(); surf_sec.points[:, 0] = nodes_mapped[idx_sec, 0] 
+                    surf_sec[plot_name] = scalars[idx_sec]
+                    self.UIAxes_2D_Sec.add_mesh(surf_sec, name='section', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=False, edge_color='black', line_width=0.5, scalar_bar_args=sargs_horiz, reset_camera=False)
+                else: 
+                    self.UIAxes_2D_Sec.add_mesh(pv.PolyData(), name='section', reset_camera=False)
+                    
+                self.UIAxes_2D_Sec.add_text(f"Section Cut (YZ) | X={closest_x * 1000.0:.1f} mm", name='txt_sec', font_size=10, color='black')
+                self.UIAxes_2D_Sec.render()
+
+            if not hasattr(self, '_2d_cams_initialized'):
+                self.UIAxes_2D_Top.enable_2d_style()
+                self.UIAxes_2D_Front.enable_2d_style()
+                self.UIAxes_2D_Sec.enable_2d_style()
+                self.reset_camera_view()
+                self._2d_cams_initialized = True
+
+        self.render_line_plots()
 
     def render_line_plots(self):
         nodes = self.Active_ROM['Nodes']
         y_top, y_bot = np.max(nodes[:, 1]), np.min(nodes[:, 1])
         y_mid = (y_top + y_bot) / 2.0  
         x_line = np.linspace(0, self.geometry['Lx'], 50)
+        x_line_mm = x_line * 1000.0
         
         defl, s_top, s_bot, s_shear = [], [], [], []
         for x in x_line:
@@ -4281,16 +4767,45 @@ class LiveDigitalTwinWindow(QMainWindow):
             
         if not hasattr(self, '_line_initialized'):
             self.line_figure.clear()
-            self.axL1 = self.line_figure.add_subplot(311); self.l_defl, = self.axL1.plot(x_line, defl, 'b', linewidth=2); self.axL1.set_title("Deflection (mm)"); self.axL1.grid(True)
-            self.axL2 = self.line_figure.add_subplot(312); self.l_top, = self.axL2.plot(x_line, s_top, 'r', label='Top Fiber'); self.l_bot, = self.axL2.plot(x_line, s_bot, 'g', label='Bottom Fiber'); self.axL2.set_title("Bending Stress (MPa)"); self.axL2.legend(); self.axL2.grid(True)
-            self.axL3 = self.line_figure.add_subplot(313); self.l_shear, = self.axL3.plot(x_line, s_shear, 'k', label='Neutral Axis'); self.axL3.set_title("Shear Stress (MPa)"); self.axL3.legend(); self.axL3.grid(True)
-            self.line_figure.tight_layout(); self._line_initialized = True
+            
+            self.axL1 = self.line_figure.add_subplot(311)
+            self.l_defl, = self.axL1.plot(x_line_mm, defl, 'b', linewidth=2)
+            self.axL1.set_title("Deflection (mm)")
+            
+            self.axL2 = self.line_figure.add_subplot(312)
+            self.l_top, = self.axL2.plot(x_line_mm, s_top, 'r', label='Tension Fiber')
+            self.l_bot, = self.axL2.plot(x_line_mm, s_bot, 'g', label='Compression Fiber')
+            self.axL2.set_title("Bending Stress (MPa)")
+            
+            self.axL3 = self.line_figure.add_subplot(313)
+            self.l_shear, = self.axL3.plot(x_line_mm, s_shear, 'k', label='Neutral Axis')
+            self.axL3.set_title("Shear Stress (MPa)")
+            
+            for ax in [self.axL1, self.axL2, self.axL3]:
+                ax.grid(True, which='both', linestyle=':', alpha=0.5)
+                ax.minorticks_on()
+                
+            self.line_figure.tight_layout()
+            self._line_initialized = True
         else:
-            self.l_defl.set_ydata(defl); self.l_top.set_ydata(s_top); self.l_bot.set_ydata(s_bot); self.l_shear.set_ydata(s_shear)
-            for ax in [self.axL1, self.axL2, self.axL3]: ax.relim(); ax.autoscale_view()
+            self.l_defl.set_ydata(defl)
+            self.l_top.set_ydata(s_top)
+            self.l_bot.set_ydata(s_bot)
+            self.l_shear.set_ydata(s_shear)
+            for ax in [self.axL1, self.axL2, self.axL3]: 
+                ax.relim()
+                ax.autoscale_view()
+
+        if np.max(np.abs(s_top)) >= np.max(np.abs(s_bot)):
+            self.l_top.set_label('Dominant: Tension')
+            self.axL2.legend(handles=[self.l_top], loc='upper right', fontsize='small')
+        else:
+            self.l_bot.set_label('Dominant: Compression')
+            self.axL2.legend(handles=[self.l_bot], loc='upper right', fontsize='small')
+                
         self.line_canvas.draw_idle()
 
-    def closeEvent(self, event):
+    def closeEvent (self, event):
         if hasattr(self, 'hw_worker'): self.hw_worker.stop()
         try: self.UIAxes_3D.close(); self.UIAxes_2D_Top.close(); self.UIAxes_2D_Front.close(); self.UIAxes_2D_Sec.close()
         except: pass
