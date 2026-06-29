@@ -1993,6 +1993,7 @@ class OfflinePreparationStudio(QMainWindow):
             
         vis_connectivity = element_connectivity[:, :n_vis]; grid = pv.UnstructuredGrid({vtk_type: vis_connectivity}, node_coords)
         targetAxes.add_mesh(grid, name='bc_base_mesh', show_edges=True, color="silver", edge_color="gray", opacity=0.4, line_width=1)
+        targetAxes.add_mesh(grid, show_edges=True, color="silver", edge_color="gray", opacity=0.4, line_width=1)
         
         fixed_dofs = np.array(bc_info.get('fixed_dofs_indices', []))
         if len(fixed_dofs) > 0:
@@ -2010,6 +2011,7 @@ class OfflinePreparationStudio(QMainWindow):
         else:
             try: targetAxes.remove_actor('bc_fixed_dofs')
             except: pass
+            targetAxes.add_mesh(spheres, color="red", show_edges=True, edge_color="black") 
             
         if len(applied_idx) > 0:
             load_coords = np.atleast_2d(node_coords[applied_idx]); load_vectors = np.atleast_2d(F_nodes[applied_idx])
@@ -2020,6 +2022,7 @@ class OfflinePreparationStudio(QMainWindow):
         else:
             try: targetAxes.remove_actor('bc_force_arrows')
             except: pass
+            targetAxes.add_mesh(arrows, color="blue")
 
         if not hasattr(targetAxes, 'axes_widget_added'):
             targetAxes.add_axes(); targetAxes.axes_widget_added = True
@@ -2609,6 +2612,9 @@ class OfflinePreparationStudio(QMainWindow):
             targetAxes.add_mesh(grid_undeformed, name='base_wireframe', style='wireframe', color='gray', opacity=0.4, line_width=1.0, reset_camera=False)
             targetAxes.add_mesh(grid_deformed, name='active_solid', scalars="Stress (MPa)", cmap="jet", clim=c_limits, show_edges=True, edge_color='black', line_width=0.1, scalar_bar_args=sargs, reset_camera=False)
             targetAxes.add_text(title_str, name='active_text', font_size=10, color='black')
+            targetAxes.add_mesh(grid_undeformed, style='wireframe', color='gray', opacity=0.4, line_width=1.0, reset_camera=False)
+            targetAxes.add_mesh(grid_deformed, scalars="Stress (MPa)", cmap="jet", clim=c_limits, show_edges=True, edge_color='black', line_width=0.1, scalar_bar_args=sargs, reset_camera=False)
+            targetAxes.add_text(title_str, font_size=10, color='black')
 
             if not hasattr(targetAxes, 'axes_widget_added'):
                 targetAxes.add_axes(); targetAxes.axes_widget_added = True
@@ -2710,6 +2716,9 @@ class OfflinePreparationStudio(QMainWindow):
             targetAxes.add_mesh(grid_undeformed, name='base_wireframe', style='wireframe', color='gray', opacity=0.4, line_width=1.0, reset_camera=False)
             targetAxes.add_mesh(grid_deformed, name='active_solid', scalars=plot_name, cmap=cmap_choice, clim=c_limits, show_edges=True, edge_color='black', line_width=0.1, scalar_bar_args=sargs, reset_camera=False)
             targetAxes.add_text(title_str, name='active_text', font_size=10, color='black')
+            targetAxes.add_mesh(grid_undeformed, style='wireframe', color='gray', opacity=0.4, line_width=1.0, reset_camera=False)
+            targetAxes.add_mesh(grid_deformed, scalars=plot_name, cmap=cmap_choice, clim=c_limits, show_edges=True, edge_color='black', line_width=0.1, scalar_bar_args=sargs, reset_camera=False)
+            targetAxes.add_text(title_str, font_size=10, color='black')
 
             if not hasattr(targetAxes, 'axes_widget_added'):
                 targetAxes.add_axes(); targetAxes.axes_widget_added = True
@@ -3538,7 +3547,6 @@ class CalibrationWindow(QMainWindow):
 # MODULE 3: ROM INTERACTIVE VISUALIZER (OFFLINE SIMULATION)
 # =====================================================================
 class ROMVisualizerWindow(QMainWindow):
-
     """Standalone window to manually simulate and visualize ROMs using sliders."""
 
     def __init__(self, dt_bank, geometry, launcher):
@@ -3573,8 +3581,8 @@ class ROMVisualizerWindow(QMainWindow):
         self.StartLiveTwinButton.setStyleSheet("font-weight: bold; background-color: #e0e0e0; color: black;")
         self.StartLiveTwinButton.clicked.connect(self.toggle_simulation)
         
-        self.StainGauge1Switch = QCheckBox("Simulate Strain Gauge 1 (Left)")
-        self.StainGauge2Switch = QCheckBox("Simulate Strain Gauge 2 (Right)")
+        self.StainGauge1Switch = QCheckBox("Clamp 1 (Left)")
+        self.StainGauge2Switch = QCheckBox("Clamp 2 (Right)")
         
         input_layout.addWidget(self.StartLiveTwinButton, 0, 0, 1, 2)
         input_layout.addWidget(self.StainGauge1Switch, 0, 2)
@@ -3600,16 +3608,13 @@ class ROMVisualizerWindow(QMainWindow):
         render_group = QGroupBox("Rendering Options")
         render_layout = QHBoxLayout(render_group)
         
-        # Primary View Toggle (Failure vs Stress)
         render_layout.addWidget(QLabel("<b>Primary Mode:</b>"))
         self.PrimaryModeCombo = QComboBox()
         self.PrimaryModeCombo.addItems(["Failure", "Stress"])
         render_layout.addWidget(self.PrimaryModeCombo)
         
-        # Dynamic Options Stack (Changes based on Primary Mode)
         self.options_stack = QStackedWidget()
         
-        # Stack 0: Failure Options
         fail_widget = QWidget(); fail_lay = QHBoxLayout(fail_widget); fail_lay.setContentsMargins(0,0,0,0)
         fail_lay.addWidget(QLabel("Output:"))
         self.FailDisplayCombo = QComboBox(); self.FailDisplayCombo.addItems(["FS", "Stress Intensity"])
@@ -3619,7 +3624,6 @@ class ROMVisualizerWindow(QMainWindow):
         fail_lay.addWidget(self.FailMethodCombo)
         self.options_stack.addWidget(fail_widget)
         
-        # Stack 1: Stress Options
         stress_widget = QWidget(); stress_lay = QHBoxLayout(stress_widget); stress_lay.setContentsMargins(0,0,0,0)
         stress_lay.addWidget(QLabel("Component:"))
         self.StressTypeCombo = QComboBox(); self.StressTypeCombo.addItems(["Sigma_xx", "Sigma_yy", "Sigma_zz", "Tau_xy", "Tau_yz", "Tau_zx"])
@@ -3632,7 +3636,6 @@ class ROMVisualizerWindow(QMainWindow):
         self.ScaleFactorEditField_2 = QLineEdit("500"); self.ScaleFactorEditField_2.setFixedWidth(50)
         render_layout.addWidget(self.ScaleFactorEditField_2)
         
-        # --- NEW: Color Limit Controls ---
         self.AutoColorLimitSwitch = QCheckBox("Auto Color")
         self.AutoColorLimitSwitch.setChecked(True)
         self.AutoColorLimitSwitch.stateChanged.connect(self.toggle_color_limits)
@@ -3650,60 +3653,46 @@ class ROMVisualizerWindow(QMainWindow):
         self.btn_apply_color.setEnabled(False)
         self.btn_apply_color.clicked.connect(self.update_visuals_only)
         render_layout.addWidget(self.btn_apply_color)
-        # ---------------------------------
         
-        self.btn_reset_cam = QPushButton("🎥 Default 3D View")
+        self.btn_reset_cam = QPushButton("🎥 Default Views")
         self.btn_reset_cam.setStyleSheet("background-color: #34495e; color: white; font-weight: bold;")
         self.btn_reset_cam.clicked.connect(self.reset_camera_view)
         render_layout.addWidget(self.btn_reset_cam)
         
         render_layout.addStretch()
         self.main_layout.addWidget(render_group, 0)
-        
 
-        # --- 3. Main Graphics Area ---
+        # --- 3. Main Graphics Tab Area (Separated into Individual Parallel View Tabs) ---#
         self.graphics_tabs = QTabWidget()
         
-        # Tab A: 3D Isometric View
+        # Tab A: 3D Isometric
         self.tab_3d = QWidget(); layout_3d = QVBoxLayout(self.tab_3d)
-        self.UIAxes_3D = QtInteractor()
-        layout_3d.addWidget(self.UIAxes_3D)
+        self.UIAxes_3D = QtInteractor(); layout_3d.addWidget(self.UIAxes_3D)
         self.graphics_tabs.addTab(self.tab_3d, "3D Isometric View")
         
-        # Tab B: 2D Orthographic Views (ANSYS STYLE)
-        self.tab_2d = QWidget(); layout_2d = QVBoxLayout(self.tab_2d)
+        # Tab B: Front View (YZ)
+        self.tab_front = QWidget(); layout_front = QVBoxLayout(self.tab_front)
+        self.UIAxes_2D_Front = QtInteractor(); layout_front.addWidget(self.UIAxes_2D_Front)
+        self.graphics_tabs.addTab(self.tab_front, "Front View (YZ)")
         
-        sec_ctrl_lay = QHBoxLayout()
+        # Tab C: Top View (XY)
+        self.tab_top = QWidget(); layout_top = QVBoxLayout(self.tab_top)
+        self.TopSliceCombo = QComboBox(); self.TopSliceCombo.addItems(["Top Layer", "Axis", "Bottom Layer"])
+        self.TopSliceCombo.currentTextChanged.connect(self.on_top_slice_changed)
+        layout_top.addWidget(self.TopSliceCombo)
+        self.UIAxes_2D_Top = QtInteractor(); layout_top.addWidget(self.UIAxes_2D_Top)
+        self.graphics_tabs.addTab(self.tab_top, "Top View (XY)")
         
-        self.TopSliceCombo = QComboBox()
-        self.TopSliceCombo.addItems(["Top Layer", "Axis", "Bottom Layer"])
-        sec_ctrl_lay.addWidget(QLabel("<b>Top View Slice (Z):</b>"))
-        sec_ctrl_lay.addWidget(self.TopSliceCombo)
-        sec_ctrl_lay.addSpacing(20)
-        
-        beam_len = self.geometry.get('Lx', 1.0)
-        self.lbl_sec = QLabel(f"<b>Section Cut (X):</b> {beam_len*500.0:.1f} mm")
-        self.SectionSlider = QSlider(Qt.Orientation.Horizontal)
-        self.SectionSlider.setRange(0, 100); self.SectionSlider.setValue(50)
-        sec_ctrl_lay.addWidget(self.lbl_sec); sec_ctrl_lay.addWidget(self.SectionSlider)
-        layout_2d.addLayout(sec_ctrl_lay)
-        
-        # Create 2D orthographic viewer widgets
-        def wrap_canvas(interactor):
-            frame = QFrame(); frame.setStyleSheet("QFrame { border: 2px solid #7f8c8d; border-radius: 4px; background: white; }")
-            lay = QVBoxLayout(frame); lay.setContentsMargins(2,2,2,2); lay.addWidget(interactor); return frame
+        # Tab D: Section Cut (XZ)
+        self.tab_sec = QWidget(); layout_sec = QVBoxLayout(self.tab_sec)
+        self.SectionSlider = QSlider(Qt.Orientation.Horizontal); self.SectionSlider.setRange(0, 100); self.SectionSlider.setValue(50)
+        self.SectionSlider.valueChanged.connect(self.on_section_change)
+        self.lbl_sec = QLabel(f"Section Cut (Y): 0.0 mm")
+        layout_sec.addWidget(self.lbl_sec); layout_sec.addWidget(self.SectionSlider)
+        self.UIAxes_2D_Sec = QtInteractor(); layout_sec.addWidget(self.UIAxes_2D_Sec)
+        self.graphics_tabs.addTab(self.tab_sec, "Section Cut (XZ)")
 
-        self.UIAxes_2D_Front = QtInteractor(); self.UIAxes_2D_Top = QtInteractor(); self.UIAxes_2D_Sec = QtInteractor()
-        grid_2d = QGridLayout(); grid_2d.setSpacing(10)
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Front), 0, 0, 2, 3) 
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Top), 2, 0, 1, 2)
-        grid_2d.addWidget(wrap_canvas(self.UIAxes_2D_Sec), 2, 2, 1, 1)
-        layout_2d.addLayout(grid_2d)
-        
-        # ADD THE MISSING TAB TO THE TAB WIDGET
-        self.graphics_tabs.addTab(self.tab_2d, "2D Orthographic Views")
-    
-        # --- 4. Far Right: 1D Engineering Line Plots ---
+        # Assemble Splitting Panes (Graphics Tabs Left vs Matplotlib Lines Right)
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
         main_splitter.addWidget(self.graphics_tabs)
         
@@ -3717,66 +3706,51 @@ class ROMVisualizerWindow(QMainWindow):
         main_splitter.setSizes([950, 350])
         self.main_layout.addWidget(main_splitter, 1)
 
-        # Connect signals
+        # Connect structural signals
         self.PrimaryModeCombo.currentIndexChanged.connect(self.switch_render_options)
         self.LoadPositionSlider_2.valueChanged.connect(self.on_slider_change)
         self.LoadValueNSlider.valueChanged.connect(self.on_force_change)
         self.LoadNEditField.textChanged.connect(self.on_text_force_change)
-        self.SectionSlider.valueChanged.connect(self.on_section_change)
         self.AutoColorLimitSwitch.stateChanged.connect(self.toggle_color_limits)
         
-        # When changing Top/Bottom view, flip the camera automatically
-        self.TopSliceCombo.currentTextChanged.connect(self.on_top_slice_changed) 
-        
-        for w in [self.StainGauge1Switch, self.StainGauge2Switch]: w.stateChanged.connect(self.run_DigitalTwin_Update)
         for w in [self.PrimaryModeCombo, self.FailDisplayCombo, self.FailMethodCombo, self.StressTypeCombo]:
-         w.currentTextChanged.connect(self.update_visuals_only)
+            w.currentTextChanged.connect(self.update_visuals_only)
         self.graphics_tabs.currentChanged.connect(self.update_visuals_only)
 
-        
-        
     def reset_camera_view(self):
-        """Forces all PyVista cameras to return to their default orientations."""
+        """Forces all PyVista cameras into their unique engineered alignments."""
         if hasattr(self, 'UIAxes_3D'):
             self.UIAxes_3D.view_isometric()
             self.UIAxes_3D.reset_camera()
             self.UIAxes_3D.render()
 
-        # Reset 2D Orthographic Views
         if hasattr(self, 'UIAxes_2D_Top'):
-            if "Bottom" in self.TopSliceCombo.currentText():
-                self.UIAxes_2D_Top.view_xy(negative=True)
-            else:
-                self.UIAxes_2D_Top.view_xy()
+            self.UIAxes_2D_Top.view_xy()
             self.UIAxes_2D_Top.camera.parallel_projection = True
-            self.UIAxes_2D_Top.reset_camera()
-            self.UIAxes_2D_Top.render()
+            # Apply a 90-degree twist around the viewing axis
+            self.UIAxes_2D_Top.camera.roll=-90
+            self.UIAxes_2D_Top.reset_camera(); self.UIAxes_2D_Top.render()
 
         if hasattr(self, 'UIAxes_2D_Front'):
-            self.UIAxes_2D_Front.view_xz()
+            self.UIAxes_2D_Front.view_yz()
             self.UIAxes_2D_Front.camera.parallel_projection = True
-            self.UIAxes_2D_Front.reset_camera()
-            self.UIAxes_2D_Front.render()
+            # Flip the front view upside down (90 degree rotation)
+            self.UIAxes_2D_Front.camera.roll= 270
+            self.UIAxes_2D_Front.reset_camera(); self.UIAxes_2D_Front.render()
 
         if hasattr(self, 'UIAxes_2D_Sec'):
-            self.UIAxes_2D_Sec.view_yz()
+            self.UIAxes_2D_Sec.view_xz()
             self.UIAxes_2D_Sec.camera.parallel_projection = True
-            self.UIAxes_2D_Sec.reset_camera()
-            self.UIAxes_2D_Sec.render()
+            self.UIAxes_2D_Sec.reset_camera(); self.UIAxes_2D_Sec.render()
 
-    # --- Interaction Logic ---
     def switch_render_options(self, index):
         self.options_stack.setCurrentIndex(index)
         self.update_visuals_only()
 
     def on_top_slice_changed(self):
         if hasattr(self, 'UIAxes_2D_Top'):
-            if "Bottom" in self.TopSliceCombo.currentText():
-                self.UIAxes_2D_Top.view_xy(negative=True)
-            else:
-                self.UIAxes_2D_Top.view_xy()
-            self.UIAxes_2D_Top.reset_camera()
-            self.UIAxes_2D_Top.render()
+            self.UIAxes_2D_Top.view_xy(negative=("Bottom" in self.TopSliceCombo.currentText()))
+            self.UIAxes_2D_Top.reset_camera(); self.UIAxes_2D_Top.render()
         self.update_visuals_only()  
 
     def toggle_simulation(self):
@@ -3811,18 +3785,16 @@ class ROMVisualizerWindow(QMainWindow):
 
     def on_section_change(self, val):
         pos_m = (val / 100.0) * self.geometry.get('Lx', 1.0)
-        self.lbl_sec.setText(f"<b>Section Clipping Plane (X-Axis):</b> {pos_m * 1000.0:.1f} mm")
-        if self.isSimulating and self.graphics_tabs.currentIndex() == 1:
-            self.render_2d_orthographic()
+        self.lbl_sec.setText(f"<b>Section Cut (Y-Axis):</b> {pos_m * 1000.0:.1f} mm")
+        if self.isSimulating and self.graphics_tabs.currentIndex() == 3:
+            self.update_visuals_only()
     
     def toggle_color_limits(self):
         is_auto = self.AutoColorLimitSwitch.isChecked()
-        self.CMinEdit.setEnabled(not is_auto)
-        self.CMaxEdit.setEnabled(not is_auto)
+        self.CMinEdit.setEnabled(not is_auto); self.CMaxEdit.setEnabled(not is_auto)
         self.btn_apply_color.setEnabled(not is_auto)
         self.update_visuals_only()
-    
-    # --- Core Math ---
+
     def run_DigitalTwin_Update(self, *args):
         if not self.isSimulating: return
         if self._is_rendering: return 
@@ -3865,6 +3837,8 @@ class ROMVisualizerWindow(QMainWindow):
             self.StartLiveTwinButton.setText('Start Simulation')
         finally:
             self._is_rendering = False
+            
+       
 
     def update_visuals_only(self, *args):
         if not self.isSimulating or self.current_U is None: return
@@ -3874,56 +3848,142 @@ class ROMVisualizerWindow(QMainWindow):
         finally: self._is_rendering = False
 
     def _update_graphics(self):
+        # Prevent rendering on uninitialized states
+        if self.Active_ROM is None or self.current_U is None or self.current_Sigma is None:
+            return
+            
         mode = self.PrimaryModeCombo.currentText()
         try: sf = float(self.ScaleFactorEditField_2.text())
         except: sf = 500.0 
-            
         try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
         except: yield_strength = 250.0 
 
-        # --- Extract Custom Color Limits ---
-        if self.AutoColorLimitSwitch.isChecked():
-            custom_clim = None
+        # --- COORDINATE MAPPING (New_X = -Old_Y, New_Y = Old_X, New_Z = -Old_Z) ---
+        nodes = self.Active_ROM['Nodes']
+        nodes_mapped = np.zeros_like(nodes)
+        nodes_mapped[:, 0] = nodes[:, 1]  
+        nodes_mapped[:, 1] = nodes[:, 0]   
+        nodes_mapped[:, 2] = nodes[:, 2]  
+        
+        U_nodes = self.current_U.reshape(-1, 3)
+        U_mapped = np.zeros_like(U_nodes)
+        U_mapped[:, 0] =  U_nodes[:, 1]
+        U_mapped[:, 1] =  U_nodes[:, 0]
+        U_mapped[:, 2] =  U_nodes[:, 2]
+        
+        U_mapped_1d = U_mapped.flatten()
+        def_coords = nodes_mapped + (U_mapped * sf)
+        
+        # Setup modern PyVista safe replacement grid
+        if 'Hexa' in self.launcher.offline_studio.element_type: n_vis, vtk_type = 8, pv.CellType.HEXAHEDRON
+        else: n_vis, vtk_type = 4, pv.CellType.TETRA
+        cells_dict = {vtk_type: self.launcher.offline_studio.element_connectivity[:, :n_vis]}
+        grid_deformed = pv.UnstructuredGrid(cells_dict, def_coords)
+
+        
+        # Color Bounds Scaling
+        if self.AutoColorLimitSwitch.isChecked(): custom_clim = None
         else:
-            try: c_min = float(self.CMinEdit.text())
-            except: c_min = -250.0
-            try: c_max = float(self.CMaxEdit.text())
-            except: c_max = 250.0
-            if c_min == c_max: c_max = c_min + 1e-6
-            custom_clim = [c_min, c_max]
-        # ----------------------------------------
+            try:
+                c_min, c_max = float(self.CMinEdit.text()), float(self.CMaxEdit.text())
+                custom_clim = [c_min, c_max] if c_min != c_max else [c_min, c_min + 1e-6]
+            except: custom_clim = None
 
-        # 1. Update 3D Tab
-        if self.graphics_tabs.currentIndex() == 0:
+        current_tab_idx = self.graphics_tabs.currentIndex()
+        # --- TAB 0: 3D VOLUME ISOMETRIC VIEW ---
+        if current_tab_idx == 0:
+            # Safely re-route mapped arrays through offline plotter definitions
+            original_coords = self.launcher.offline_studio.node_coords
+            self.launcher.offline_studio.node_coords = nodes_mapped
+            
             if mode == "Stress":
-                self.launcher.offline_studio.plot_stresses(self.current_Sigma, self.StressTypeCombo.currentText(), self.UIAxes_3D, self.current_U, sf, custom_clim=custom_clim)
+                self.launcher.offline_studio.plot_stresses(self.current_Sigma, self.StressTypeCombo.currentText(), self.UIAxes_3D, U_mapped_1d, sf, custom_clim=custom_clim)
             else:
-                self.launcher.offline_studio.plot_FS(self.FailMethodCombo.currentText(), yield_strength, self.UIAxes_3D, self.current_Sigma, self.current_U, sf, self.FailDisplayCombo.currentText(), custom_clim=custom_clim)
-            self.UIAxes_3D.add_text(f"Visualizer: {self.Active_ROM['Label']}", name="live_lbl", position='upper_right', color='blue')
+                self.launcher.offline_studio.plot_FS(self.FailMethodCombo.currentText(), yield_strength, self.UIAxes_3D, self.current_Sigma, U_mapped_1d, sf, self.FailDisplayCombo.currentText(), custom_clim=custom_clim)
             self.UIAxes_3D.update()
+            self.launcher.offline_studio.node_coords = original_coords
 
-        # 2. Update 2D Ortho Tab
-        elif self.graphics_tabs.currentIndex() == 1:
-            self.render_2d_orthographic(custom_clim)
+        # --- TAB 1, 2, 3: HIGH-SPEED PARALLEL 2D EXTRACTIONS (Removes direct _actors references) ---
+        elif current_tab_idx in [1,2,3]:
+            
+            scalars, cmap, plot_name = self.get_plot_scalars()
+            if current_tab_idx == 1:
+              grid_deformed.point_data[plot_name] = scalars
 
-        # 3. Always update 1D Line Plots
+            else:
+                # --- Generate the UN-DEFORMED static unstructured grid for Orthographic assessment ---
+             grid_undeformed = pv.UnstructuredGrid(cells_dict, nodes_mapped)
+             grid_undeformed.point_data[plot_name] = scalars
+
+            c_limits = custom_clim if custom_clim is not None else [np.min(scalars), np.max(scalars) + 1e-6]
+            sargs_horiz = dict(title_font_size=10, label_font_size=8, vertical=False, position_x=0.05, position_y=0.02, width=0.9, height=0.08)
+            sargs_vert = dict(title_font_size=10, label_font_size=8, vertical=True, position_x=0.88, position_y=0.05, width=0.08, height=0.85)
+
+            # TAB 1: FRONT VIEW (YZ Plane)
+            if current_tab_idx == 1:
+                self.UIAxes_2D_Front.clear() # Safe alternative to remove_actor()
+                x_cut = (grid_deformed.bounds[0] + grid_deformed.bounds[1]) / 2.0
+                try:
+                    slice_front = grid_deformed.slice(normal='x', origin=(x_cut, 0, 0))
+                    self.UIAxes_2D_Front.add_mesh(slice_front, name='front', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=False, scalar_bar_args=sargs_vert, reset_camera=False)
+                except: pass
+                
+                self.UIAxes_2D_Front.render()
+                
+
+           
+            # ====================================================================
+            # TAB 2: TOP VIEW (XY Plane Layer Cut - UNDEFORMED SHAPE)
+            # ====================================================================
+            elif current_tab_idx == 2:
+                self.UIAxes_2D_Top.clear()
+                z_max, z_min = np.max(nodes_mapped[:, 2]), np.min(nodes_mapped[:, 2])
+                top_choice = self.TopSliceCombo.currentText()
+                
+                # Apply an epsilon offset inward from the boundary surfaces to prevent numerical clipping crashes
+                if "Top" in top_choice:
+                    target_z = z_max - 1e-4
+                elif "Bottom" in top_choice:
+                    target_z = z_min + 1e-4
+                else:
+                    target_z = (z_max + z_min) / 2.0
+                    
+                try:
+                    slice_top = grid_undeformed.slice(normal='z', origin=(0, 0, target_z))
+                    self.UIAxes_2D_Top.add_mesh(slice_top, name='top', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=False, scalar_bar_args=sargs_horiz, reset_camera=False)
+                except: pass
+                
+                # Keep camera standard rotation alignment updated
+               
+                self.UIAxes_2D_Top.render()
+
+            # ====================================================================
+            # TAB 3: SECTION CUT (XZ Plane Length Cross-Section - UNDEFORMED SHAPE)
+            # ====================================================================
+            elif current_tab_idx == 3:
+                self.UIAxes_2D_Sec.clear()
+                cut_y = (self.SectionSlider.value() / 100.0) * self.geometry['Lx']
+                try:
+                    # Slice the un-deformed grid so cross-sectional boundaries remain constant
+                    slice_sec = grid_undeformed.slice(normal='y', origin=(0, cut_y, 0))
+                    self.UIAxes_2D_Sec.add_mesh(slice_sec, name='section', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=False, scalar_bar_args=sargs_horiz, reset_camera=False)
+                except: pass
+                
+                self.UIAxes_2D_Sec.render()
+
         self.render_line_plots()
 
-    # --- Matplotlib & Data Helper ---
     def get_plot_scalars(self):
         mode = self.PrimaryModeCombo.currentText()
         if mode == "Stress":
             s_map = {'Sigma_xx': 0, 'Sigma_yy': 1, 'Sigma_zz': 2, 'Tau_xy': 3, 'Tau_yz': 4, 'Tau_zx': 5}
             col = s_map.get(self.StressTypeCombo.currentText(), 0)
-            ledgend = "Stress (MPa)"
-            return self.current_Sigma[:, col] / 1e6, "jet", ledgend
+            return self.current_Sigma[:, col] / 1e6, "jet", "Stress (MPa)"
         else:
             sx, sy, sz = self.current_Sigma[:, 0], self.current_Sigma[:, 1], self.current_Sigma[:, 2]
             txy, tyz, tzx = self.current_Sigma[:, 3], self.current_Sigma[:, 4], self.current_Sigma[:, 5]
             fail_mode = self.FailMethodCombo.currentText()
             num_nodes = len(sx)
-            
-            # --- THE FIX: Apply Eigenvalue Math to 2D Views ---
             if "von mises" in fail_mode.lower():
                 val = np.sqrt(0.5*((sx-sy)**2 + (sy-sz)**2 + (sz-sx)**2 + 6*(txy**2 + tyz**2 + tzx**2))) / 1e6
             elif "principal" in fail_mode.lower() or "tresca" in fail_mode.lower() or "shear" in fail_mode.lower():
@@ -3932,201 +3992,68 @@ class ROMVisualizerWindow(QMainWindow):
                 stress_tensors[:, 1, 0] = txy; stress_tensors[:, 1, 1] = sy;  stress_tensors[:, 1, 2] = tyz
                 stress_tensors[:, 2, 0] = tzx; stress_tensors[:, 2, 1] = tyz; stress_tensors[:, 2, 2] = sz
                 eigenvalues = np.linalg.eigvalsh(stress_tensors)
-                
-                if "principal" in fail_mode.lower(): val = eigenvalues[:, 2] / 1e6
-                else: val = (eigenvalues[:, 2] - eigenvalues[:, 0]) / 2.0 / 1e6 # Tresca / Max Shear
+                val = eigenvalues[:, 2] / 1e6 if "principal" in fail_mode.lower() else (eigenvalues[:, 2] - eigenvalues[:, 0]) / 2.0 / 1e6
             else:
                 val = np.sqrt(0.5*((sx-sy)**2 + (sy-sz)**2 + (sz-sx)**2 + 6*(txy**2 + tyz**2 + tzx**2))) / 1e6
-            # --------------------------------------------------
                 
-            if self.FailDisplayCombo.currentText() == "Stress":
-                ledgend = "Stress (MPa)"
-                return val, "jet", ledgend
+            if self.FailDisplayCombo.currentText() == "Stress": return val, "jet", "Stress (MPa)"
             else:
                 try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
                 except: yield_strength = 250.0 
-                fs = yield_strength / np.maximum(val, 1e-6)
-                ledgend = "FS"
-                return fs, "jet_r",ledgend
-
-    def render_2d_orthographic(self, custom_clim=None):
-        """Renders Top/Sec (Undeformed Frame) and Front (Deformed Shape) dynamically."""
-        if self.current_U is None: return
-
-        scalars, cmap, plot_name = self.get_plot_scalars()
-        try: sf = float(self.ScaleFactorEditField_2.text())
-        except: sf = 500.0
-
-        # We need both original nodes (for static Top/Sec) and deformed coords (for Front slice)
-        nodes = self.Active_ROM['Nodes']
-        U_nodes = self.current_U.reshape(-1, 3)
-        def_coords = nodes + (U_nodes * sf)
-
-        if custom_clim is not None:
-            c_limits = custom_clim
-        else:
-            s_min, s_max = np.min(scalars), np.max(scalars)
-            if s_min == s_max: s_max = s_min + 1e-6
-            c_limits = [s_min, s_max]
-            
-        sargs_horiz = dict(title_font_size=10, label_font_size=8, shadow=False, n_labels=3, fmt="%.1f", vertical=False, position_x=0.05, position_y=0.02, width=0.9, height=0.08)
-        sargs_vert = dict(title_font_size=10, label_font_size=8, shadow=False, n_labels=3, fmt="%.1f", vertical=True, position_x=0.88, position_y=0.05, width=0.08, height=0.85)
-
-        for ax in [self.UIAxes_2D_Top, self.UIAxes_2D_Front, self.UIAxes_2D_Sec]:
-            try: ax.clear_scalar_bars()
-            except:
-                for key in list(ax.scalar_bars.keys()): ax.remove_scalar_bar(key)
-
-        # ====================================================================
-        # 1. Top View Widget (Static Undeformed Surface via Node IDs)
-        # ====================================================================
-        z_max, z_min = np.max(nodes[:, 2]), np.min(nodes[:, 2])
-        
-        top_choice = self.TopSliceCombo.currentText()
-        if "Top" in top_choice: target_z = z_max
-        elif "Bottom" in top_choice: target_z = z_min
-        else: target_z = (z_max + z_min) / 2.0
-        
-        # EXTRACT NODE IDs on the Z-layer
-        idx_top = np.where(np.abs(nodes[:, 2] - target_z) < 1e-4)[0]
-        
-        if len(idx_top) > 0:
-            # Build surface using UNDEFORMED coords, but color it with NEW scalars
-            surf_top = pv.PolyData(nodes[idx_top]).delaunay_2d()
-            surf_top[plot_name] = scalars[idx_top]
-            self.UIAxes_2D_Top.add_mesh(surf_top, name='top', scalars=plot_name, cmap=cmap, clim=c_limits, 
-                                        show_edges=True, edge_color='black', line_width=0.5, 
-                                        scalar_bar_args=sargs_horiz, reset_camera=False)
-        else:
-            self.UIAxes_2D_Top.add_mesh(pv.PolyData(), name='top', reset_camera=False)
-
-        self.UIAxes_2D_Top.add_text(f"Top View (XY) | Layer: {top_choice}", name='txt_top', font_size=10, color='black')
-
-
-        # ====================================================================
-        # 2. Front View Widget (Slice of the DEFORMED Shape)
-        # ====================================================================
-        # Store camera BEFORE adding the mesh
-        cam_front = self.UIAxes_2D_Front.camera_position if hasattr(self, '_2d_cams_initialized') else None
-        
-        if 'Hexa' in self.launcher.offline_studio.element_type: n_vis = 8; vtk_type = pv.CellType.HEXAHEDRON
-        else: n_vis = 4; vtk_type = pv.CellType.TETRA
-        cells_dict = {vtk_type: self.launcher.offline_studio.element_connectivity[:, :n_vis]}
-        
-        # Use def_coords here to show the bending shape
-        grid_deformed = pv.UnstructuredGrid(cells_dict, def_coords)
-        grid_deformed.point_data[plot_name] = scalars
-
-        y_cut = (grid_deformed.bounds[2] + grid_deformed.bounds[3]) / 2.0 
-        try:
-            front_slice = grid_deformed.slice(normal='y', origin=(0, y_cut, 0))
-            self.UIAxes_2D_Front.add_mesh(front_slice, name='front', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=True, edge_color='black', line_width=1.5, scalar_bar_args=sargs_vert, reset_camera=False)
-        except:
-            self.UIAxes_2D_Front.add_mesh(pv.PolyData(), name='front', reset_camera=False)
-
-        self.UIAxes_2D_Front.add_text("Front View (XZ) | Deformed Axis Slice", name='txt_front', font_size=10, color='black')
-        
-        # Safely restore camera if it was set
-        if cam_front is not None: 
-            self.UIAxes_2D_Front.camera_position = cam_front
-
-
-        # ====================================================================
-        # 3. Section View Widget (Static Undeformed Surface via Node IDs)
-        # ====================================================================
-        cut_x = (self.SectionSlider.value() / 100.0) * self.geometry['Lx']
-        
-        # Find exact closest X coordinate
-        unique_x = np.unique(np.round(nodes[:, 0], decimals=4))
-        closest_x = unique_x[np.argmin(np.abs(unique_x - cut_x))]
-        
-        # EXTRACT NODE IDs on the X-layer
-        idx_sec = np.where(np.abs(nodes[:, 0] - closest_x) < 1e-4)[0]
-        
-        if len(idx_sec) > 0:
-            # Flatten to YZ plane so Delaunay triangulates properly, then restore undeformed X
-            pts_yz = nodes[idx_sec].copy()
-            pts_yz[:, 0] = 0 
-            surf_sec = pv.PolyData(pts_yz).delaunay_2d()
-            surf_sec.points[:, 0] = nodes[idx_sec, 0] # Restore frozen Undeformed X coords
-            
-            surf_sec[plot_name] = scalars[idx_sec]
-            self.UIAxes_2D_Sec.add_mesh(surf_sec, name='section', scalars=plot_name, cmap=cmap, clim=c_limits, 
-                                        show_edges=True, edge_color='black', line_width=0.5, 
-                                        scalar_bar_args=sargs_horiz, reset_camera=False)
-        else:
-            self.UIAxes_2D_Sec.add_mesh(pv.PolyData(), name='section', reset_camera=False)
-
-        self.UIAxes_2D_Sec.add_text(f"Section Cut (YZ) | X={closest_x * 1000.0:.1f} mm", name='txt_sec', font_size=10, color='black')
-
-        # --- INITIALIZE CAMERAS ONLY ONCE ON FIRST RUN ---
-        if not hasattr(self, '_2d_cams_initialized'):
-            self.UIAxes_2D_Top.view_xy(negative=("Bottom" in top_choice))
-            self.UIAxes_2D_Top.camera.parallel_projection = True
-            
-            self.UIAxes_2D_Front.view_xz()
-            self.UIAxes_2D_Front.camera.parallel_projection = True
-            
-            self.UIAxes_2D_Sec.view_yz()
-            self.UIAxes_2D_Sec.camera.parallel_projection = True
-            
-            self.reset_camera_view()
-            self._2d_cams_initialized = True
-
-        # Render frames smoothly
-        self.UIAxes_2D_Top.render()
-        self.UIAxes_2D_Front.render()
-        self.UIAxes_2D_Sec.render()
+                return yield_strength / np.maximum(val, 1e-6), "jet_r", "Factor of Safety"
 
     def render_line_plots(self):
         nodes = self.Active_ROM['Nodes']
         y_top, y_bot = np.max(nodes[:, 1]), np.min(nodes[:, 1])
-        y_mid = (y_top + y_bot) / 2.0  # The Neutral Axis
+        y_mid = (y_top + y_bot) / 2.0  
         x_line = np.linspace(0, self.geometry['Lx'], 50)
         x_line_mm = x_line * 1000.0
         
         defl, s_top, s_bot, s_shear = [], [], [], []
         for x in x_line:
-            # Find nodes closest to the top, bottom, and middle at this X slice
             idx_t = np.argmin(np.sqrt((nodes[:, 0]-x)**2 + (nodes[:, 1]-y_top)**2))
             idx_b = np.argmin(np.sqrt((nodes[:, 0]-x)**2 + (nodes[:, 1]-y_bot)**2))
             idx_m = np.argmin(np.sqrt((nodes[:, 0]-x)**2 + (nodes[:, 1]-y_mid)**2))
-            
-            # Extract values
             defl.append(self.current_U[idx_t * 3 + 1] * 1000) 
             s_top.append(self.current_Sigma[idx_t, 0] / 1e6)              
             s_bot.append(self.current_Sigma[idx_b, 0] / 1e6) 
-            s_shear.append(self.current_Sigma[idx_m, 3] / 1e6) # Index 3 is Tau_xy (Shear)
+            s_shear.append(self.current_Sigma[idx_m, 3] / 1e6) 
             
         if not hasattr(self, '_line_initialized'):
             self.line_figure.clear()
-            
-            # 3 Rows, 1 Column layout
             self.axL1 = self.line_figure.add_subplot(311)
             self.l_defl, = self.axL1.plot(x_line_mm, defl, 'b', linewidth=2)
-            self.axL1.set_title("Deflection (mm)"); self.axL1.grid(True)
+            self.axL1.set_title("Deflection (mm)")
             
             self.axL2 = self.line_figure.add_subplot(312)
-            self.l_top, = self.axL2.plot(x_line_mm, s_top, 'r', label='Top Fiber')
-            self.l_bot, = self.axL2.plot(x_line_mm, s_bot, 'g', label='Bottom Fiber')
-            self.axL2.set_title("Bending Stress (MPa)"); self.axL2.legend(); self.axL2.grid(True)
-
+            self.l_top, = self.axL2.plot(x_line_mm, s_top, 'r', label='Tension Fiber')
+            self.l_bot, = self.axL2.plot(x_line_mm, s_bot, 'g', label='Compression Fiber')
+            self.axL2.set_title("Bending Stress (MPa)")
+            
             self.axL3 = self.line_figure.add_subplot(313)
             self.l_shear, = self.axL3.plot(x_line_mm, s_shear, 'k', label='Neutral Axis')
-            self.axL3.set_title("Shear Stress (MPa)"); self.axL3.legend(); self.axL3.grid(True)
+            self.axL3.set_title("Shear Stress (MPa)")
             
+            for ax in [self.axL1, self.axL2, self.axL3]:
+                ax.grid(True, which='both', linestyle=':', alpha=0.5)
+                ax.minorticks_on()
+                
             self.line_figure.tight_layout()
             self._line_initialized = True
         else:
-            # Fast in-place updates to prevent crashes
             self.l_defl.set_ydata(defl)
             self.l_top.set_ydata(s_top)
             self.l_bot.set_ydata(s_bot)
             self.l_shear.set_ydata(s_shear)
-            
             for ax in [self.axL1, self.axL2, self.axL3]: 
-                ax.relim()
-                ax.autoscale_view()
+                ax.relim(); ax.autoscale_view()
+
+        if np.max(np.abs(s_top)) >= np.max(np.abs(s_bot)):
+            self.l_top.set_label('Dominant: Tension')
+            self.axL2.legend(handles=[self.l_top], loc='upper right', fontsize='small')
+        else:
+            self.l_bot.set_label('Dominant: Compression')
+            self.axL2.legend(handles=[self.l_bot], loc='upper right', fontsize='small')
                 
         self.line_canvas.draw_idle()
 
@@ -4138,8 +4065,7 @@ class ROMVisualizerWindow(QMainWindow):
             self.UIAxes_2D_Front.close()
             self.UIAxes_2D_Sec.close()
         except: pass
-        if hasattr(self, 'launcher') and self.launcher:
-            self.launcher.visualizer_window = None 
+        if hasattr(self, 'launcher') and self.launcher: self.launcher.visualizer_window = None 
         event.accept()
 
 
@@ -4172,11 +4098,13 @@ class LiveDigitalTwinWindow(QMainWindow):
         self.build_ui()
         
         # --- BACKGROUND THREAD SETUP ---
+        # Assuming HardwareWorker is defined elsewhere in your code
         self.hw_worker = HardwareWorker(self.sm)
         self.hw_worker.data_ready.connect(self.process_live_data)
         self.hw_worker.error_occurred.connect(self.handle_thread_error)
         
     def build_ui(self):
+
         # =================================================================
         # 1. TOP DASHBOARD (3-Column Professional Layout)
         # =================================================================
@@ -4300,76 +4228,68 @@ class LiveDigitalTwinWindow(QMainWindow):
         # =================================================================
         # 2. MAIN CONTENT AREA (Graphics + Plots)
         # =================================================================
-        main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.graphics_tabs = QTabWidget()
         
-        # Tab A: 3D View
+        # Tab A: 3D Isometric
         self.tab_3d = QWidget(); layout_3d = QVBoxLayout(self.tab_3d)
         self.UIAxes_3D = QtInteractor(); layout_3d.addWidget(self.UIAxes_3D)
         self.graphics_tabs.addTab(self.tab_3d, "3D Isometric View")
-
-        # Tab B: 2D Push-Button Views
-        self.tab_2d = QWidget()
-        layout_2d = QVBoxLayout(self.tab_2d)
         
-        btn_nav_layout = QHBoxLayout()
-        self.btn_show_front = QPushButton("🎞️ Front View (XZ)")
-        self.btn_show_top = QPushButton("📐 Top View (XY)")
-        self.btn_show_sec = QPushButton("✂️ Section Cut (YZ)")
-        for b in [self.btn_show_front, self.btn_show_top, self.btn_show_sec]:
-            b.setCheckable(True); btn_nav_layout.addWidget(b)
-            
-        layout_2d.addLayout(btn_nav_layout)
+        # Tab B: Front View (YZ)
+        self.tab_front = QWidget(); layout_front = QVBoxLayout(self.tab_front)
+        self.UIAxes_2D_Front = QtInteractor(); layout_front.addWidget(self.UIAxes_2D_Front)
+        self.graphics_tabs.addTab(self.tab_front, "Front View (YZ)")
+        
+        # Tab C: Top View (XY)
+        self.tab_top = QWidget(); layout_top = QVBoxLayout(self.tab_top)
+        self.TopSliceCombo = QComboBox(); self.TopSliceCombo.addItems(["Top Layer", "Axis", "Bottom Layer"])
+        self.TopSliceCombo.currentTextChanged.connect(self.on_top_slice_changed)
+        layout_top.addWidget(self.TopSliceCombo)
+        self.UIAxes_2D_Top = QtInteractor(); layout_top.addWidget(self.UIAxes_2D_Top)
+        self.graphics_tabs.addTab(self.tab_top, "Top View (XY)")
+        
+        # Tab D: Section Cut (XZ)
+        self.tab_sec = QWidget(); layout_sec = QVBoxLayout(self.tab_sec)
+        self.SectionSlider = QSlider(Qt.Orientation.Horizontal); self.SectionSlider.setRange(0, 100); self.SectionSlider.setValue(50)
+        self.SectionSlider.valueChanged.connect(self.on_section_change)
+        self.lbl_sec = QLabel(f"Section Cut (Y): 0.0 mm")
+        layout_sec.addWidget(self.lbl_sec); layout_sec.addWidget(self.SectionSlider)
+        self.UIAxes_2D_Sec = QtInteractor(); layout_sec.addWidget(self.UIAxes_2D_Sec)
+        self.graphics_tabs.addTab(self.tab_sec, "Section Cut (XZ)")
 
-        sec_ctrl = QHBoxLayout()
-        self.TopSliceCombo = QComboBox(); self.TopSliceCombo.addItems(["Top", "Axis", "Bottom"])
-        self.ViewSectionSlider = QSlider(Qt.Orientation.Horizontal); self.ViewSectionSlider.setRange(0, 100); self.ViewSectionSlider.setValue(50)
-        self.lbl_sec = QLabel(f"Section Cut (X): -- mm")
-        sec_ctrl.addWidget(QLabel("Slice Layer:")); sec_ctrl.addWidget(self.TopSliceCombo); sec_ctrl.addSpacing(20); sec_ctrl.addWidget(self.lbl_sec); sec_ctrl.addWidget(self.ViewSectionSlider)
-        layout_2d.addLayout(sec_ctrl)
-
-        self.ortho_sub_stack = QStackedWidget()
-        self.UIAxes_2D_Front = QtInteractor()
-        self.UIAxes_2D_Top = QtInteractor()
-        self.UIAxes_2D_Sec = QtInteractor()
-        self.ortho_sub_stack.addWidget(self.UIAxes_2D_Front)
-        self.ortho_sub_stack.addWidget(self.UIAxes_2D_Top)
-        self.ortho_sub_stack.addWidget(self.UIAxes_2D_Sec)
-        layout_2d.addWidget(self.ortho_sub_stack)
-        self.graphics_tabs.addTab(self.tab_2d, "2D Orthographic Views")
+        # Assemble Splitting Panes (Graphics Tabs Left vs Matplotlib Lines Right)
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
         main_splitter.addWidget(self.graphics_tabs)
-
-        # Tab C: Line Plots
-        plots_panel = QWidget(); plots_lay = QVBoxLayout(plots_panel)
-        self.line_figure = Figure(figsize=(4, 6), tight_layout=True); self.line_canvas = FigureCanvas(self.line_figure)
-        plots_lay.addWidget(self.line_canvas); main_splitter.addWidget(plots_panel)
         
-        main_splitter.setSizes([1100, 400])
+        right_panel = QWidget(); right_lay = QVBoxLayout(right_panel)
+        right_lay.addWidget(QLabel("<b>Engineering Line Plots</b>"))
+        self.line_figure = Figure(figsize=(4, 8), tight_layout=True)
+        self.line_canvas = FigureCanvas(self.line_figure)
+        right_lay.addWidget(self.line_canvas)
+        main_splitter.addWidget(right_panel)
+        
+        main_splitter.setSizes([950, 350])
         self.main_layout.addWidget(main_splitter, 1)
 
-        # --- Re-attach Signals ---
-        self.btn_show_front.clicked.connect(lambda: [self.ortho_sub_stack.setCurrentIndex(0), self.update_nav_buttons(0)])
-        self.btn_show_top.clicked.connect(lambda: [self.ortho_sub_stack.setCurrentIndex(1), self.update_nav_buttons(1)])
-        self.btn_show_sec.clicked.connect(lambda: [self.ortho_sub_stack.setCurrentIndex(2), self.update_nav_buttons(2)])
-        
+        # --- CORRECTED SIGNAL CONNECTIONS ---
         self.btn_connect_hw.clicked.connect(self.attempt_connect)
-        self.btn_go_live.toggled.connect(self.toggle_live_feed)
-        self.ViewSectionSlider.valueChanged.connect(self.on_section_change)
+        self.btn_go_live.clicked.connect(self.toggle_live_feed)
+        self.PrimaryModeCombo.currentIndexChanged.connect(self.update_visuals_only)
+        self.SectionSlider.valueChanged.connect(self.on_section_change)
         self.AutoColorLimitSwitch.stateChanged.connect(self.toggle_color_limits)
         self.btn_apply_color.clicked.connect(self.update_visuals_only)
         self.btn_reset_cam.clicked.connect(self.reset_camera_view)
         
         for w in [self.PrimaryModeCombo, self.FailDisplayCombo, self.FailMethodCombo, self.StressTypeCombo]:
             w.currentTextChanged.connect(self.update_visuals_only)
-            
         self.graphics_tabs.currentChanged.connect(self.update_visuals_only)
-        self.update_nav_buttons(0) 
 
     # =================================================================
     # UI LOGIC & HARDWARE THREADING
     # =================================================================
     def attempt_connect(self):
-        if self.launcher.calib_window: self.launcher.calib_window.handle_connect()
+        if hasattr(self.launcher, 'calib_window') and self.launcher.calib_window: 
+            self.launcher.calib_window.handle_connect()
         else:
             if self.sm.connect(): QMessageBox.information(self, "Hardware", "Direct Connection Successful")
             else: QMessageBox.warning(self, "Hardware Error", "Could not connect to Arduino.")
@@ -4396,44 +4316,47 @@ class LiveDigitalTwinWindow(QMainWindow):
 
     def on_section_change(self, val):
         pos_m = (val / 100.0) * self.geometry['Lx']
-        self.lbl_sec.setText(f"Section Cut (X): {pos_m * 1000.0:.1f} mm")
-        if self.graphics_tabs.currentIndex() == 1: self.update_visuals_only()
+        self.lbl_sec.setText(f"Section Cut (Y): {pos_m * 1000.0:.1f} mm")
+        if self.graphics_tabs.currentIndex() == 3: self.update_visuals_only()
 
     def reset_camera_view(self):
-        """Forces all active PyVista cameras into their unique engineered alignments."""
+        """Forces all PyVista cameras into their unique engineered alignments."""
         if hasattr(self, 'UIAxes_3D'):
-            # Custom Isometric View: Look from -X, +Y, -Z towards the origin
-            # view_vector is the direction the camera points. 
-            self.UIAxes_3D.view_vector(vector=(-1.0, 1.0, -1.0), viewup=(0.0, 0.0, -1.0))
+            self.UIAxes_3D.view_isometric()
             self.UIAxes_3D.reset_camera()
             self.UIAxes_3D.render()
 
-        # Setup strict parallel orthographic planes for 2D sub-widgets
         if hasattr(self, 'UIAxes_2D_Top'):
-            self.UIAxes_2D_Top.view_xy(negative=("Bottom" in self.TopSliceCombo.currentText()))
+            self.UIAxes_2D_Top.view_xy()
             self.UIAxes_2D_Top.camera.parallel_projection = True
+            # Apply a 90-degree twist around the viewing axis
+            self.UIAxes_2D_Top.camera.roll=90
             self.UIAxes_2D_Top.reset_camera(); self.UIAxes_2D_Top.render()
 
         if hasattr(self, 'UIAxes_2D_Front'):
-            self.UIAxes_2D_Front.view_xz()
-            self.UIAxes_2D_Front.camera.up = (0, -1, 1)
+            self.UIAxes_2D_Front.view_yz()
             self.UIAxes_2D_Front.camera.parallel_projection = True
+            # Flip the front view upside down (90 degree rotation)
+            self.UIAxes_2D_Front.camera.roll= 270
             self.UIAxes_2D_Front.reset_camera(); self.UIAxes_2D_Front.render()
 
         if hasattr(self, 'UIAxes_2D_Sec'):
-            self.UIAxes_2D_Sec.view_yz()
+            self.UIAxes_2D_Sec.view_xz()
             self.UIAxes_2D_Sec.camera.parallel_projection = True
             self.UIAxes_2D_Sec.reset_camera(); self.UIAxes_2D_Sec.render()
 
-    def update_nav_buttons(self, active_idx):
-        buttons = [self.btn_show_front, self.btn_show_top, self.btn_show_sec]
-        for i, btn in enumerate(buttons):
-            btn.setChecked(i == active_idx)
-            btn.setStyleSheet(
-                "background-color: #2980b9; color: white; font-weight: bold;" if i == active_idx 
-                else "background-color: #ecf0f1; color: #2c3e50;"
-            )
-        self.update_visuals_only()
+
+    def on_top_slice_changed(self):
+        self.update_visuals_only()      
+
+    def safe_add_mesh(self, interactor, mesh, name, **kwargs):
+        """Safely add a mesh without triggering internal PyVista _actors crashes."""
+        try:
+            if name in interactor.renderer.actors:
+                interactor.renderer.remove_actor(interactor.renderer.actors[name])
+        except Exception: pass
+        interactor.add_mesh(mesh, name=name, **kwargs)
+        
 
     # =================================================================
     # REAL-TIME MATH (Triggered by Hardware Thread)
@@ -4456,7 +4379,12 @@ class LiveDigitalTwinWindow(QMainWindow):
             self.in_S3.setText(f"{strains[2]:.1f}")
             self.load_pos_m.setText(f"{p_mm:.1f}")
 
-            # --- RULE 3: CHECK IF LOAD IS OFF (Triggers Auto-Tare & Aborts Classification) ---
+            # Ensure we always have an Active_ROM reference
+            if self.Active_ROM is None:
+                self.Active_ROM = self.DT_Bank[0]
+            num_nodes = self.Active_ROM['NumNodes']
+
+            # --- CHECK IF LOAD IS OFF (Triggers Auto-Tare) ---
             if abs(force_n) < 0.5:  
                 raw = np.asarray(getattr(self.sm, 'live_raw', []), dtype=float)
                 if raw.size >= 5:
@@ -4467,20 +4395,18 @@ class LiveDigitalTwinWindow(QMainWindow):
                 self.predict_s1.setText("P1: 0.0 uE")
                 self.predict_s2.setText("P2: 0.0 uE")
                 self.predict_s3.setText("P3: 0.0 uE")
-                
-                self.in_Load.setText("0.0")
-                self.in_S1.setText("0.0")
-                self.in_S2.setText("0.0")
-                self.in_S3.setText("0.0")
-                
                 self.lbl_fs_status.setText("Unladen: System & Load Cell Zeroed")
                 self.lbl_fs_status.setStyleSheet("font-size: 11pt; font-weight: bold; background: #34495e; color: white; padding: 10px; border-radius: 6px;")
                 
-                self.UIAxes_3D.clear()
+                # FIX: Do NOT clear the axes. Push a 0-stress state to the renderer instead!
+                self.current_U = np.zeros(num_nodes * 3)
+                self.current_Sigma = np.zeros((num_nodes, 6))
+                self._update_graphics()
+                
                 self._is_rendering = False
                 return  
 
-            # --- RULE 2: BEAM CLASSIFICATION IS DRIVEN STRICTLY BY ACTIVE SENSOR DATA ---
+            # --- BEAM CLASSIFICATION STRICTLY BY ACTIVE SENSOR DATA ---
             strains_array = np.array(strains, dtype=float)
             strain_signs = np.sign(strains_array)
             s1_opposes_s2 = strain_signs[0] != 0 and strain_signs[1] != 0 and strain_signs[0] != strain_signs[1]
@@ -4497,15 +4423,12 @@ class LiveDigitalTwinWindow(QMainWindow):
             self.launcher.offline_studio.node_coords = self.Active_ROM['Nodes']
             self.launcher.offline_studio.element_type = self.Active_ROM['ElementType']
             if 'Connectivity' in self.Active_ROM: self.launcher.offline_studio.element_connectivity = self.Active_ROM['Connectivity']
-            else:
-                self.btn_go_live.setChecked(False)
-                return
 
             # --- Physics Projection Engine ---
             Lx = self.geometry['Lx']
             load_pos_m = max(0, min(p_mm / 1000.0, Lx))
             temp_loads = self.launcher.offline_studio.define_loads_at_pos(load_pos_m, force_n)
-            num_nodes = self.Active_ROM['NumNodes']
+            
             F_temp = np.zeros(num_nodes * 3)
             for j in range(len(temp_loads['point_nodes'])):
                 node_id = temp_loads['point_nodes'][j]
@@ -4564,6 +4487,7 @@ class LiveDigitalTwinWindow(QMainWindow):
                 self.lbl_fs_status.setText(f"✓ FS: {fs:.2f} | SAFE")
                 self.lbl_fs_status.setStyleSheet(f"font-size: 11pt; font-weight: bold; background: {ProfessionalTheme.SUCCESS_GREEN}; color: white; padding: 10px; border-radius: 6px;")
 
+            # Finally, push data to the screens
             self._update_graphics()
 
         except Exception as e:
@@ -4613,20 +4537,21 @@ class LiveDigitalTwinWindow(QMainWindow):
                 return yield_strength / np.maximum(val, 1e-6), "jet_r", "Factor of Safety"
 
     def _update_graphics(self):
-        # 1. Safety Check
         if self.Active_ROM is None or self.current_U is None or self.current_Sigma is None:
             return
             
         mode = self.PrimaryModeCombo.currentText()
         try: sf = float(self.ScaleFactorEditField_2.text())
         except: sf = 500.0 
-        
-        # --- COORDINATE MAPPING (New = -Y, Y=X, Z=-Z) ---
+        try: yield_strength = float(self.launcher.offline_studio.YieldStrengthMpaEditField.text())
+        except: yield_strength = 250.0 
+
+        # --- COORDINATE MAPPING (New_X = -Old_Y, New_Y = Old_X, New_Z = -Old_Z) ---
         nodes = self.Active_ROM['Nodes']
         nodes_mapped = np.zeros_like(nodes)
-        nodes_mapped[:, 0] = -nodes[:, 1]
-        nodes_mapped[:, 1] = nodes[:, 0]
-        nodes_mapped[:, 2] = -nodes[:, 2]
+        nodes_mapped[:, 0] = -nodes[:, 1]  
+        nodes_mapped[:, 1] = nodes[:, 0]   
+        nodes_mapped[:, 2] = -nodes[:, 2]  
         
         U_nodes = self.current_U.reshape(-1, 3)
         U_mapped = np.zeros_like(U_nodes)
@@ -4634,110 +4559,100 @@ class LiveDigitalTwinWindow(QMainWindow):
         U_mapped[:, 1] = U_nodes[:, 0]
         U_mapped[:, 2] = -U_nodes[:, 2]
         
+        U_mapped_1d = U_mapped.flatten()
         def_coords = nodes_mapped + (U_mapped * sf)
-        # --------------------------------------------------
+        
+        if 'Hexa' in self.launcher.offline_studio.element_type: n_vis, vtk_type = 8, pv.CellType.HEXAHEDRON
+        else: n_vis, vtk_type = 4, pv.CellType.TETRA
+        cells_dict = {vtk_type: self.launcher.offline_studio.element_connectivity[:, :n_vis]}
+        
+        grid_deformed = pv.UnstructuredGrid(cells_dict, def_coords)
 
+        # Color Bounds Scaling
         if self.AutoColorLimitSwitch.isChecked(): custom_clim = None
         else:
-            try: 
+            try:
                 c_min, c_max = float(self.CMinEdit.text()), float(self.CMaxEdit.text())
                 custom_clim = [c_min, c_max] if c_min != c_max else [c_min, c_min + 1e-6]
             except: custom_clim = None
 
-        # 2. RENDER 3D TAB (Remains Full Volume)
-        if self.graphics_tabs.currentIndex() == 0:
-            if mode == "Stress": 
-                self.launcher.offline_studio.plot_stresses(self.current_Sigma, self.StressTypeCombo.currentText(), self.UIAxes_3D, self.current_U, sf, custom_clim=custom_clim)
-            else: 
-                self.launcher.offline_studio.plot_FS(self.FailMethodCombo.currentText(), float(self.launcher.offline_studio.YieldStrengthMpaEditField.text() or 250), 
-                                                      self.UIAxes_3D, self.current_Sigma, self.current_U, sf, self.FailDisplayCombo.currentText(), custom_clim=custom_clim)
-            self.UIAxes_3D.add_text(f"Live Twin Active: {self.Active_ROM['Label']}", name="live_lbl", position='upper_right', color='red')
-            self.UIAxes_3D.update()
+        current_tab_idx = self.graphics_tabs.currentIndex()
 
-        # 3. RENDER 2D ORTHOGRAPHIC TAB (Lightweight Mode)
-        elif self.graphics_tabs.currentIndex() == 1:
-            scalars, cmap, plot_name = self.get_plot_scalars()
-            c_limits = custom_clim if custom_clim else [np.min(scalars), np.max(scalars) + 1e-6]
+        # --- TAB 0: 3D VOLUME ISOMETRIC VIEW ---
+        if current_tab_idx == 0:
+            original_coords = self.launcher.offline_studio.node_coords
+            self.launcher.offline_studio.node_coords = nodes_mapped
             
-            sargs_horiz = dict(title_font_size=10, label_font_size=8, shadow=False, n_labels=3, fmt="%.1f", vertical=False, position_x=0.05, position_y=0.02, width=0.9, height=0.08)
-            sargs_vert = dict(title_font_size=10, label_font_size=8, shadow=False, n_labels=3, fmt="%.1f", vertical=True, position_x=0.88, position_y=0.05, width=0.08, height=0.85)
+            if mode == "Stress":
+                self.launcher.offline_studio.plot_stresses(self.current_Sigma, self.StressTypeCombo.currentText(), self.UIAxes_3D, U_mapped_1d, sf, custom_clim=custom_clim)
+            else:
+                self.launcher.offline_studio.plot_FS(self.FailMethodCombo.currentText(), yield_strength, self.UIAxes_3D, self.current_Sigma, U_mapped_1d, sf, self.FailDisplayCombo.currentText(), custom_clim=custom_clim)
+            
+            try: self.UIAxes_3D.add_text(f"Live Twin Active: {self.Active_ROM['Label']}", name="live_lbl", position='upper_right', color='red')
+            except: pass
+            
+            self.UIAxes_3D.update()
+            self.launcher.offline_studio.node_coords = original_coords
 
-            active_view_idx = self.ortho_sub_stack.currentIndex()
+        # --- TAB 1, 2, 3: HIGH-SPEED PARALLEL 2D EXTRACTIONS ---
+        elif current_tab_idx in [1, 2, 3]:
+            scalars, cmap, plot_name = self.get_plot_scalars()
+            c_limits = custom_clim if custom_clim is not None else [np.min(scalars), np.max(scalars) + 1e-6]
+            sargs_horiz = dict(title_font_size=10, label_font_size=8, vertical=False, position_x=0.05, position_y=0.02, width=0.9, height=0.08)
+            sargs_vert = dict(title_font_size=10, label_font_size=8, vertical=True, position_x=0.88, position_y=0.05, width=0.08, height=0.85)
 
-            # Front View (XZ Plane) - LIGHTWEIGHT SLICE
-            if active_view_idx == 0:
-                cam_front = self.UIAxes_2D_Front.camera_position if hasattr(self, '_2d_cams_initialized') else None
-                try: self.UIAxes_2D_Front.clear_scalar_bars()
+            # TAB 1: FRONT VIEW (YZ Plane) - DEFORMED
+            if current_tab_idx == 1:
+                grid_deformed.point_data[plot_name] = scalars
+                self.UIAxes_2D_Front.clear() 
+                x_cut = (grid_deformed.bounds[0] + grid_deformed.bounds[1]) / 2.0
+                try:
+                    slice_front = grid_deformed.slice(normal='x', origin=(x_cut, 0, 0))
+                    self.safe_add_mesh(self.UIAxes_2D_Front, slice_front, name='front', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=False, scalar_bar_args=sargs_vert, reset_camera=False)
                 except: pass
                 
-                # Find nodes strictly near the Y-centerline (Neutral Axis)
-                y_center = (np.max(nodes_mapped[:, 1]) + np.min(nodes_mapped[:, 1])) / 2.0
-                idx_front = np.where(np.abs(nodes_mapped[:, 1] - y_center) < 1e-3)[0]
-                
-                if len(idx_front) > 0:
-                    # Render ONLY the nodes on this plane as a 2D Delaunay mesh, skipping 3D volume slicing
-                    pts_xz = def_coords[idx_front].copy()
-                    pts_xz[:, 1] = 0  # Flatten to XZ plane mathematically for reliable triangulation
-                    
-                    try:
-                        surf_front = pv.PolyData(pts_xz).delaunay_2d()
-                        # Restore the actual Y coordinate to maintain spatial truth
-                        surf_front.points[:, 1] = def_coords[idx_front, 1]
-                        surf_front[plot_name] = scalars[idx_front]
-                        
-                        self.UIAxes_2D_Front.add_mesh(surf_front, name='front', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=False, edge_color='black', line_width=1.5, scalar_bar_args=sargs_vert, reset_camera=False)
-                    except:
-                        # Fallback to point cloud if triangulation fails (super fast)
-                        pc = pv.PolyData(def_coords[idx_front])
-                        pc[plot_name] = scalars[idx_front]
-                        self.UIAxes_2D_Front.add_mesh(pc, name='front', scalars=plot_name, cmap=cmap, clim=c_limits, render_points_as_spheres=True, point_size=5, scalar_bar_args=sargs_vert, reset_camera=False)
-                else:
-                    self.UIAxes_2D_Front.add_mesh(pv.PolyData(), name='front', reset_camera=False)
-
-                self.UIAxes_2D_Front.add_text("Front View (XZ) | Deformed Axis Slice", name='txt_front', font_size=10, color='black')
-                if cam_front is not None: self.UIAxes_2D_Front.camera_position = cam_front
+                if not hasattr(self, '_2d_cams_initialized'): 
+                    self.UIAxes_2D_Front.view_yz()
+                    self.UIAxes_2D_Front.camera.up = (0, 0, -1)
                 self.UIAxes_2D_Front.render()
 
-            # Top View (XY plane) - LIGHTWEIGHT EXTRACTION
-            elif active_view_idx == 1:
-                try: self.UIAxes_2D_Top.clear_scalar_bars()
-                except: pass
-                z_max, z_min = np.max(nodes_mapped[:, 2]), np.min(nodes_mapped[:, 2])
-                top_choice = self.TopSliceCombo.currentText()
-                if "Top" in top_choice: target_z = z_max
-                elif "Bottom" in top_choice: target_z = z_min
-                else: target_z = (z_max + z_min) / 2.0
-                
-                idx_top = np.where(np.abs(nodes_mapped[:, 2] - target_z) < 1e-4)[0]
-                if len(idx_top) > 0:
-                    surf_top = pv.PolyData(nodes_mapped[idx_top]).delaunay_2d()
-                    surf_top[plot_name] = scalars[idx_top]
-                    self.UIAxes_2D_Top.add_mesh(surf_top, name='top', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=False, edge_color='black', line_width=0.5, scalar_bar_args=sargs_horiz, reset_camera=False)
-                else: 
-                    self.UIAxes_2D_Top.add_mesh(pv.PolyData(), name='top', reset_camera=False)
+            # For Tabs 2 and 3: Create UNDEFORMED static grid
+            if current_tab_idx in [2, 3]:
+                grid_undeformed = pv.UnstructuredGrid(cells_dict, nodes_mapped)
+                grid_undeformed.point_data[plot_name] = scalars
 
-                self.UIAxes_2D_Top.add_text(f"Top View (XY) | Layer: {top_choice}", name='txt_top', font_size=10, color='black')
-                self.UIAxes_2D_Top.render()
-
-            # Section View (YZ plane) - LIGHTWEIGHT EXTRACTION
-            elif active_view_idx == 2:
-                try: self.UIAxes_2D_Sec.clear_scalar_bars()
-                except: pass
-                cut_x = (self.ViewSectionSlider.value() / 100.0) * self.geometry['Lx']
-                unique_x = np.unique(np.round(nodes_mapped[:, 0], decimals=4))
-                closest_x = unique_x[np.argmin(np.abs(unique_x - cut_x))]
-                idx_sec = np.where(np.abs(nodes_mapped[:, 0] - closest_x) < 1e-4)[0]
-                
-                if len(idx_sec) > 0:
-                    pts_yz = nodes_mapped[idx_sec].copy(); pts_yz[:, 0] = 0 
-                    surf_sec = pv.PolyData(pts_yz).delaunay_2d(); surf_sec.points[:, 0] = nodes_mapped[idx_sec, 0] 
-                    surf_sec[plot_name] = scalars[idx_sec]
-                    self.UIAxes_2D_Sec.add_mesh(surf_sec, name='section', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=False, edge_color='black', line_width=0.5, scalar_bar_args=sargs_horiz, reset_camera=False)
-                else: 
-                    self.UIAxes_2D_Sec.add_mesh(pv.PolyData(), name='section', reset_camera=False)
+                # TAB 2: TOP VIEW (XY Plane Layer Cut) - STATIC
+                if current_tab_idx == 2:
+                    self.UIAxes_2D_Top.clear()
+                    z_max, z_min = np.max(nodes_mapped[:, 2]), np.min(nodes_mapped[:, 2])
+                    top_choice = self.TopSliceCombo.currentText()
                     
-                self.UIAxes_2D_Sec.add_text(f"Section Cut (YZ) | X={closest_x * 1000.0:.1f} mm", name='txt_sec', font_size=10, color='black')
-                self.UIAxes_2D_Sec.render()
+                    if "Top" in top_choice: target_z = z_max - 1e-4
+                    elif "Bottom" in top_choice: target_z = z_min + 1e-4
+                    else: target_z = (z_max + z_min) / 2.0
+                        
+                    try:
+                        slice_top = grid_undeformed.slice(normal='z', origin=(0, 0, target_z))
+                        self.safe_add_mesh(self.UIAxes_2D_Top, slice_top, name='top', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=False, scalar_bar_args=sargs_horiz, reset_camera=False)
+                    except: pass
+                    
+                    self.UIAxes_2D_Top.view_xy()
+                    self.UIAxes_2D_Top.camera.roll = 90
+                    self.UIAxes_2D_Top.render()
+
+                # TAB 3: SECTION CUT (XZ Plane Length Cross-Section) - STATIC
+                elif current_tab_idx == 3:
+                    self.UIAxes_2D_Sec.clear()
+                    cut_y = (self.SectionSlider.value() / 100.0) * self.geometry['Lx']
+                    try:
+                        slice_sec = grid_undeformed.slice(normal='y', origin=(0, cut_y, 0))
+                        self.safe_add_mesh(self.UIAxes_2D_Sec, slice_sec, name='section', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=False, scalar_bar_args=sargs_horiz, reset_camera=False)
+                    except: pass
+                    
+                    if not hasattr(self, '_2d_cams_initialized'):
+                        self.UIAxes_2D_Sec.view_xz()
+                        self.UIAxes_2D_Sec.camera.up = (0, 0, 1) # Prevent Warning
+                    self.UIAxes_2D_Sec.render()
 
             if not hasattr(self, '_2d_cams_initialized'):
                 self.UIAxes_2D_Top.enable_2d_style()
@@ -4750,35 +4665,46 @@ class LiveDigitalTwinWindow(QMainWindow):
 
     def render_line_plots(self):
         nodes = self.Active_ROM['Nodes']
-        y_top, y_bot = np.max(nodes[:, 1]), np.min(nodes[:, 1])
+        nodes_mapped = np.zeros_like(nodes)
+        nodes_mapped[:, 0] = -nodes[:, 1]  
+        nodes_mapped[:, 1] = nodes[:, 0]   
+        nodes_mapped[:, 2] = -nodes[:, 2]  
+
+        y_top, y_bot = np.max(nodes_mapped[:, 2]), np.min(nodes_mapped[:, 2])
         y_mid = (y_top + y_bot) / 2.0  
-        x_line = np.linspace(0, self.geometry['Lx'], 50)
-        x_line_mm = x_line * 1000.0
+        x_center = (np.max(nodes_mapped[:, 0]) + np.min(nodes_mapped[:, 0])) / 2.0 
         
+        y_line = np.linspace(0, self.geometry['Lx'], 50)
+        y_line_mm = y_line * 1000.0
+        
+        U_mapped = np.zeros_like(self.current_U.reshape(-1, 3))
+        U_mapped[:, 2] = -self.current_U.reshape(-1, 3)[:, 2]
+        U_mapped_1d = U_mapped.flatten()
+
         defl, s_top, s_bot, s_shear = [], [], [], []
-        for x in x_line:
-            idx_t = np.argmin(np.sqrt((nodes[:, 0]-x)**2 + (nodes[:, 1]-y_top)**2))
-            idx_b = np.argmin(np.sqrt((nodes[:, 0]-x)**2 + (nodes[:, 1]-y_bot)**2))
-            idx_m = np.argmin(np.sqrt((nodes[:, 0]-x)**2 + (nodes[:, 1]-y_mid)**2))
-            defl.append(self.current_U[idx_t * 3 + 1] * 1000) 
+        for y_val in y_line:
+            idx_t = np.argmin(np.sqrt((nodes_mapped[:, 1]-y_val)**2 + (nodes_mapped[:, 2]-y_top)**2 + (nodes_mapped[:, 0]-x_center)**2))
+            idx_b = np.argmin(np.sqrt((nodes_mapped[:, 1]-y_val)**2 + (nodes_mapped[:, 2]-y_bot)**2 + (nodes_mapped[:, 0]-x_center)**2))
+            idx_m = np.argmin(np.sqrt((nodes_mapped[:, 1]-y_val)**2 + (nodes_mapped[:, 2]-y_mid)**2 + (nodes_mapped[:, 0]-x_center)**2))
+            
+            defl.append(U_mapped_1d[idx_t * 3 + 2] * 1000) 
             s_top.append(self.current_Sigma[idx_t, 0] / 1e6)              
             s_bot.append(self.current_Sigma[idx_b, 0] / 1e6) 
             s_shear.append(self.current_Sigma[idx_m, 3] / 1e6) 
             
         if not hasattr(self, '_line_initialized'):
             self.line_figure.clear()
-            
             self.axL1 = self.line_figure.add_subplot(311)
-            self.l_defl, = self.axL1.plot(x_line_mm, defl, 'b', linewidth=2)
+            self.l_defl, = self.axL1.plot(y_line_mm, defl, 'b', linewidth=2)
             self.axL1.set_title("Deflection (mm)")
             
             self.axL2 = self.line_figure.add_subplot(312)
-            self.l_top, = self.axL2.plot(x_line_mm, s_top, 'r', label='Tension Fiber')
-            self.l_bot, = self.axL2.plot(x_line_mm, s_bot, 'g', label='Compression Fiber')
+            self.l_top, = self.axL2.plot(y_line_mm, s_top, 'r', label='Tension Fiber')
+            self.l_bot, = self.axL2.plot(y_line_mm, s_bot, 'g', label='Compression Fiber')
             self.axL2.set_title("Bending Stress (MPa)")
             
             self.axL3 = self.line_figure.add_subplot(313)
-            self.l_shear, = self.axL3.plot(x_line_mm, s_shear, 'k', label='Neutral Axis')
+            self.l_shear, = self.axL3.plot(y_line_mm, s_shear, 'k', label='Neutral Axis')
             self.axL3.set_title("Shear Stress (MPa)")
             
             for ax in [self.axL1, self.axL2, self.axL3]:
@@ -4793,8 +4719,7 @@ class LiveDigitalTwinWindow(QMainWindow):
             self.l_bot.set_ydata(s_bot)
             self.l_shear.set_ydata(s_shear)
             for ax in [self.axL1, self.axL2, self.axL3]: 
-                ax.relim()
-                ax.autoscale_view()
+                ax.relim(); ax.autoscale_view()
 
         if np.max(np.abs(s_top)) >= np.max(np.abs(s_bot)):
             self.l_top.set_label('Dominant: Tension')
@@ -4805,13 +4730,16 @@ class LiveDigitalTwinWindow(QMainWindow):
                 
         self.line_canvas.draw_idle()
 
-    def closeEvent (self, event):
+    def closeEvent(self, event):
         if hasattr(self, 'hw_worker'): self.hw_worker.stop()
-        try: self.UIAxes_3D.close(); self.UIAxes_2D_Top.close(); self.UIAxes_2D_Front.close(); self.UIAxes_2D_Sec.close()
+        try: 
+            self.UIAxes_3D.close()
+            self.UIAxes_2D_Top.close()
+            self.UIAxes_2D_Front.close()
+            self.UIAxes_2D_Sec.close()
         except: pass
         if hasattr(self, 'launcher') and self.launcher: self.launcher.live_window = None 
         event.accept()
-
 
 # =========================================================================
 # APPLICATION ENTRY POINT
