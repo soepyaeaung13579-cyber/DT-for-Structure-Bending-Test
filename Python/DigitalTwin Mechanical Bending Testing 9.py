@@ -4330,7 +4330,7 @@ class LiveDigitalTwinWindow(QMainWindow):
             self.UIAxes_2D_Top.view_xy()
             self.UIAxes_2D_Top.camera.parallel_projection = True
             # Apply a 90-degree twist around the viewing axis
-            self.UIAxes_2D_Top.camera.roll=90
+            self.UIAxes_2D_Top.camera.roll=-90
             self.UIAxes_2D_Top.reset_camera(); self.UIAxes_2D_Top.render()
 
         if hasattr(self, 'UIAxes_2D_Front'):
@@ -4539,6 +4539,11 @@ class LiveDigitalTwinWindow(QMainWindow):
     def _update_graphics(self):
         if self.Active_ROM is None or self.current_U is None or self.current_Sigma is None:
             return
+
+        # --- SAFETY GATE: Check if connectivity data exists ---
+        connectivity = getattr(self.launcher.offline_studio, 'element_connectivity', None)
+        if connectivity is None:
+            return # Data not ready yet; skip this render frame
             
         mode = self.PrimaryModeCombo.currentText()
         try: sf = float(self.ScaleFactorEditField_2.text())
@@ -4561,11 +4566,11 @@ class LiveDigitalTwinWindow(QMainWindow):
         
         U_mapped_1d = U_mapped.flatten()
         def_coords = nodes_mapped + (U_mapped * sf)
+
         
         if 'Hexa' in self.launcher.offline_studio.element_type: n_vis, vtk_type = 8, pv.CellType.HEXAHEDRON
         else: n_vis, vtk_type = 4, pv.CellType.TETRA
         cells_dict = {vtk_type: self.launcher.offline_studio.element_connectivity[:, :n_vis]}
-        
         grid_deformed = pv.UnstructuredGrid(cells_dict, def_coords)
 
         # Color Bounds Scaling
@@ -4612,9 +4617,8 @@ class LiveDigitalTwinWindow(QMainWindow):
                 except: pass
                 
                 if not hasattr(self, '_2d_cams_initialized'): 
-                    self.UIAxes_2D_Front.view_yz()
-                    self.UIAxes_2D_Front.camera.up = (0, 0, -1)
-                self.UIAxes_2D_Front.render()
+                  
+                 self.UIAxes_2D_Front.render()
 
             # For Tabs 2 and 3: Create UNDEFORMED static grid
             if current_tab_idx in [2, 3]:
@@ -4636,8 +4640,7 @@ class LiveDigitalTwinWindow(QMainWindow):
                         self.safe_add_mesh(self.UIAxes_2D_Top, slice_top, name='top', scalars=plot_name, cmap=cmap, clim=c_limits, show_edges=False, scalar_bar_args=sargs_horiz, reset_camera=False)
                     except: pass
                     
-                    self.UIAxes_2D_Top.view_xy()
-                    self.UIAxes_2D_Top.camera.roll = 90
+                
                     self.UIAxes_2D_Top.render()
 
                 # TAB 3: SECTION CUT (XZ Plane Length Cross-Section) - STATIC
@@ -4650,9 +4653,8 @@ class LiveDigitalTwinWindow(QMainWindow):
                     except: pass
                     
                     if not hasattr(self, '_2d_cams_initialized'):
-                        self.UIAxes_2D_Sec.view_xz()
-                        self.UIAxes_2D_Sec.camera.up = (0, 0, 1) # Prevent Warning
-                    self.UIAxes_2D_Sec.render()
+                    
+                     self.UIAxes_2D_Sec.render()
 
             if not hasattr(self, '_2d_cams_initialized'):
                 self.UIAxes_2D_Top.enable_2d_style()
