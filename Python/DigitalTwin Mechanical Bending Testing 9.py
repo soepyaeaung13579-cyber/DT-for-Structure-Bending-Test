@@ -2436,10 +2436,13 @@ class OfflinePreparationStudio(QMainWindow):
 
     def update_Validation_Summary(self, u_1d, u_3d, s_1d, s_3d, ss_1d, ss_3d, cpu_time, targetTextArea):
         # 1. Numerical Extraction (SI to mm/MPa)
-        max_u_fom = np.max(np.abs(u_3d)) * 1000 if len(u_3d) > 0 else np.max(np.abs(self.U_full)) * 1000
-        max_s_fom = np.max(np.abs(s_3d)) / 1e6 if len(s_3d) > 0 else np.max(np.abs(self.Sigma_Final2[:, 0])) / 1e6
-        max_ss_fom = np.max(np.abs(ss_3d)) / 1e6 if len(ss_3d) > 0 else np.max(np.abs(self.Sigma_Final2[:, 5])) / 1e6
-        
+        # max_u_fom = np.max(np.abs(u_3d)) * 1000 if len(u_3d) > 0 else
+        max_u_fom =  np.max(np.abs(self.U_full)) * 1000
+        # max_s_fom = np.max(np.abs(s_3d)) / 1e6 if len(s_3d) > 0 else 
+        max_s_fom = np.max(np.abs(self.Sigma_Final2[:, 0])) / 1e6
+        # max_ss_fom = np.max(np.abs(ss_3d)) / 1e6 if len(ss_3d) > 0 else 
+        max_ss_fom = np.max(np.abs(self.Sigma_Final2[:, 5])) / 1e6
+
         max_u_1d = np.max(np.abs(u_1d)) * 1000
         max_s_1d = np.max(np.abs(s_1d)) / 1e6
         max_ss_1d = np.max(np.abs(ss_1d)) / 1e6
