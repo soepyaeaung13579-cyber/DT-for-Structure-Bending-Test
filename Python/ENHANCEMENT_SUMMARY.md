@@ -310,3 +310,32 @@ Created comprehensive **GUI_DOCUMENTATION.md** file containing:
 
 **Completion Date:** May 2, 2026  
 **Status:** ✅ READY FOR PRODUCTION
+
+---
+
+## **Performance: Solver & Online Reconstruction Speed-ups**
+
+### Overview
+Concise, practical recommendations to accelerate reduced-order solves and online reconstruction during live simulation.
+
+### Solver speed-ups
+- Use an offline/online split: precompute reduced operators (Φᵀ K Φ) and factorize once (Cholesky/LU), then reuse the factorization online.
+- Reuse cached decompositions (LU/Cholesky) across timesteps when model topology and boundary conditions do not change.
+- Prefer iterative solvers with good preconditioners for larger reduced sizes and exploit symmetry/sparsity when present.
+- Link NumPy to a multi-threaded BLAS (OpenBLAS, MKL) or use optimized sparse factorization libraries to improve linear-algebra throughput.
+- Reduce basis size using energy-based truncation and explore hyper-reduction methods (DEIM, GNAT) for nonlinear or parametric costs.
+- Offload hot Python loops to compiled code (Numba/Cython) or to a small native extension where needed.
+
+### Online reconstruction speed-ups
+- Precompute projection operators and mapping matrices (e.g., Φ_sensor, Φ_stress) offline so online evaluation is a small dense multiply: predicted = Φ_sensor @ α.
+- Avoid reconstructing the full field `U_full = Φ @ α` when only a few sensor/readout locations are required; compute outputs directly in reduced space.
+- Minimize memory allocations by preallocating work buffers and reusing arrays between updates.
+- Decouple physics update rate from GUI rendering: run the ROM solve at a higher frequency while updating plots at a lower, fixed render rate.
+- Vectorize operations and batch multiple sensor predictions together to leverage BLAS efficiency.
+- When available, use GPU acceleration or JIT (Numba) for dense projection kernels that dominate runtime.
+
+### Implementation notes
+- Profile the live pipeline first to identify true hotspots before optimizing.
+- Validate numerical equivalence after basis truncation or hyper-reduction; monitor prediction error metrics on-line.
+- Prioritize: (1) cache reduced factorization, (2) compute sensor outputs from α, (3) reduce allocations and vectorize, (4) consider JIT/compiled kernels.
+

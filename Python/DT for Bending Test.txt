@@ -2590,7 +2590,8 @@ class DigitalTwin_Mechanical_Testing(QMainWindow):
         num_snapshots = int(self.num_snapshotsEditField.text())
         
         # Expand training envelope to learn boundary physics (1% to 99%)
-        x_positions = np.linspace(0.01 * self.geometry['Lx'], 0.99 * self.geometry['Lx'], num_snapshots)
+        u = np.linspace(0.0, 1.0, num_snapshots)
+        x_positions = (0.001 + 0.998 * 0.5 * (1.0 - np.cos(np.pi * u))) * self.geometry['Lx']
         
         free_dofs = self.bc_info['free_dofs_indices']
         num_free_dof = len(free_dofs)

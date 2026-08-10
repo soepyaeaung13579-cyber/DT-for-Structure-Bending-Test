@@ -1132,7 +1132,7 @@ class OfflinePreparationStudio(QMainWindow):
         form.addRow("Element_type:", self.Element_typeDropDown)
         
         self.IntpointDropDown = QComboBox()
-        self.IntpointDropDown.addItems(["Full", "Reduce"])
+        self.IntpointDropDown.addItems(["Full", "Reduce","14point"])
         form.addRow("Int point:", self.IntpointDropDown)
         
         btn_mesh = QPushButton("Meshing"); btn_mesh.clicked.connect(self.MeshingButtonPushed)
@@ -1567,7 +1567,7 @@ class OfflinePreparationStudio(QMainWindow):
             if self.element_type == 'Tet4': num_gp = 1
             elif self.element_type == 'Tet10': num_gp = 4 if integration_type == 'full' else 1
             elif self.element_type == 'Hexa8': num_gp = 8 if integration_type == 'full' else 1
-            elif self.element_type == 'Hexa20': num_gp = 27 if integration_type == 'full' else 8
+            elif self.element_type == 'Hexa20': num_gp = 27 if integration_type == 'full' else (8 if integration_type=='reduce' else 14) 
             else: raise ValueError(f"Unknown element type: {self.element_type}")
 
             nodes_per_elem = self.mesh_info['nodes_per_element']
@@ -1698,10 +1698,13 @@ class OfflinePreparationStudio(QMainWindow):
             [0,    0,    0,    0, 0, (1-2*nu)/2]
         ])
         
-        n_order = 2 if Settings.get('Integration', '').lower() == 'full' else 1
-        gpts, gwts = self.GetGaussTable(n_order) 
-        num_gp = n_order**3
-        Be_all = np.zeros((6 * num_gp, 24))
+        n_order = 2 if Settings.get('Integration', '').lower() == 'full' else (1 if Settings.get('Integration', '').lower() == 'reduced' else 0)
+        if n_order == 0:
+            raise ValueError("Integration order must be 1 or 2 for Hexa8 elements.")
+        else:
+            gpts, gwts = self.GetGaussTable(n_order)
+            num_gp = n_order**3
+            Be_all = np.zeros((6 * num_gp, 24))
         gp_count = 0
         
         for i in range(n_order):
@@ -1751,9 +1754,11 @@ class OfflinePreparationStudio(QMainWindow):
         for i in range(3): C[i, i] = lambda_val + 2*mu
         C[3, 3] = C[4, 4] = C[5, 5] = mu
         
-        nGauss_vol = 4 if Settings.get('Integration', '').lower() == 'full' else 1  
+        nGauss_vol = 4 if Settings.get('Integration', '').lower() == 'full' else (1 if Settings.get('Integration', '').lower() == 'reduced' else 0)
         Be_all = np.zeros((6 * nGauss_vol, 30))
-        g_pts, g_w = self.GetGaussTableTetrahedra(nGauss_vol) 
+        if nGauss_vol == 0: raise ValueError("Integration order must be 1 or 4 for Tet10 elements.")
+        else:
+         g_pts, g_w = self.GetGaussTableTetrahedra(nGauss_vol) 
         Ke = np.zeros((30, 30)); Fb = np.zeros(30); Vol_Scale = 1.0 / 6.0 
         
         for ig in range(nGauss_vol):
@@ -1802,7 +1807,10 @@ class OfflinePreparationStudio(QMainWindow):
         for i in range(3): C[i, i] = lambda_val + 2 * mu
         C[3, 3] = C[4, 4] = C[5, 5] = mu
         
-        g_pts, g_w = self.GetGaussTableTetrahedra(1)
+        n_order = 2 if Settings.get('Integration', '').lower() == 'full' else (1 if Settings.get('Integration', '').lower() == 'reduced' else 0)
+        if n_order==0: raise ValueError("Integration order must be 1 or 2 for Tet4 elements.")
+        else:
+            g_pts, g_w = self.GetGaussTableTetrahedra(n_order)
         Ke = np.zeros((12, 12)); Fb = np.zeros(12); Be_all = np.zeros((6, 12))
         
         for ig in range(len(g_w)):
@@ -1827,6 +1835,7 @@ class OfflinePreparationStudio(QMainWindow):
         Fs = np.zeros(12); Fl = np.zeros(12); F_total = Fb + Fs + Fl
         return Ke, Fb, Fs, Fl, F_total, C, Be_all
 
+
     def Hexa20_Element_Routine(self, Material, Coord, Loads, Settings):
         E = Material['E']; nu = Material['nu']
         D_const = E / ((1 + nu) * (1 - 2 * nu))
@@ -1840,9 +1849,43 @@ class OfflinePreparationStudio(QMainWindow):
         ])
         
         Ke = np.zeros((60, 60)); Fb = np.zeros(60)
-        n_order = 3 if Settings.get('Integration', '').lower() == 'full' else 2
-        g_pts, g_w = self.BuildHexaGauss(n_order)
-        num_gp = n_order**3
+        integration_mode = Settings.get('Integration', '').lower()
+        
+        # --- 14-POINT INTEGRATION LOGIC ---
+        if integration_mode == '14point':
+            num_gp = 14
+            
+            # 14-point rule constants (Irons' rule coordinates and weights)
+            a = 0.795822425754221
+            b = 0.758786910639328
+            w_a = 0.886421592695420
+            w_b = 0.335180055401662
+            
+            # 8 Corner-aligned points
+            gp_corners = np.array([
+                [-a, -a, -a], [ a, -a, -a], [ a,  a, -a], [-a,  a, -a],
+                [-a, -a,  a], [ a, -a,  a], [ a,  a,  a], [-a,  a,  a]
+            ])
+            w_corners = np.ones(8) * w_a
+            
+            # 6 Axis/Face-aligned points
+            gp_axes = np.array([
+                [-b,  0,  0], [ b,  0,  0],
+                [ 0, -b,  0], [ 0,  b,  0],
+                [ 0,  0, -b], [ 0,  0,  b]
+            ])
+            w_axes = np.ones(6) * w_b
+            
+            # Combine into master tables
+            g_pts = np.vstack((gp_corners, gp_axes))
+            g_w = np.concatenate((w_corners, w_axes))
+            
+        else:
+            # Fallback to your existing 27-point (full) or 8-point (reduced) product grids
+            n_order = 3 if integration_mode == 'full' else 2
+            g_pts, g_w = self.BuildHexaGauss(n_order)
+            num_gp = n_order**3
+            
         Be_all = np.zeros((6 * num_gp, 60)); gp_count = 0
         
         for ig in range(g_pts.shape[0]):
@@ -1873,7 +1916,7 @@ class OfflinePreparationStudio(QMainWindow):
             
         Fs = np.zeros(60); Fl = np.zeros(60); F_total = Fb + Fs + Fl
         return Ke, Fb, Fs, Fl, F_total, D, Be_all
-    
+
     def Hexa20_ShapeFunctions(self, xi, eta, zeta):
         N = np.zeros(20); dN_dxi = np.zeros(20); dN_deta = np.zeros(20); dN_dzeta = np.zeros(20)
         pts = np.array([[-1, -1, -1], [ 1, -1, -1], [ 1,  1, -1], [-1,  1, -1], [-1, -1,  1], [ 1, -1,  1], [ 1,  1,  1], [-1,  1,  1]])
@@ -2255,28 +2298,49 @@ class OfflinePreparationStudio(QMainWindow):
     def PostProcess_Stress_3Dsparse(self, B_global, D, U_global, Coords, Connectivity, ElementType):
         Num_Nodes = Coords.shape[0]; Num_Elem = Connectivity.shape[0]
         total_B_rows = B_global.shape[0]; num_gp = total_B_rows // (6 * Num_Elem)
-        if total_B_rows % (6 * Num_Elem) != 0: raise ValueError(f"B_global rows ({total_B_rows}) is not a multiple of 6 * Num_Elements ({6*Num_Elem}).")
+        if total_B_rows % (6 * Num_Elem) != 0: 
+            raise ValueError(f"B_global rows ({total_B_rows}) is not a multiple of 6 * Num_Elements ({6*Num_Elem}).")
             
+        # 1. Compute Gauss Point Stresses
         epsilon_all = B_global.dot(U_global); strain_matrix = epsilon_all.reshape(-1, 6).T
         sigma_gauss_all = D @ strain_matrix 
         
-        if hasattr(self, 'Get_Emat_3D_Full'): E_mat = self.Get_Emat_3D_Full(Coords[Connectivity[0, :]], ElementType, num_gp)
-        else: E_mat = np.ones((Connectivity.shape[1], num_gp)) / num_gp
+        # 2. Retrieve the Extrapolation Matrix for this scheme
+        if hasattr(self, 'Get_Emat_3D_Full'): 
+            E_mat = self.Get_Emat_3D_Full(Coords[Connectivity[0, :]], ElementType, num_gp)
+        else: 
+            E_mat = np.ones((Connectivity.shape[1], num_gp)) / num_gp
             
         nodes_per_elem = Connectivity.shape[1]
+        
+        # 3. FIX: Build val_idx to align with row_idx and col_idx flattening order
+        # Repeat the element connectivity sequence for every Gauss point
         row_idx = np.repeat(Connectivity, num_gp, axis=1).ravel()
+        
+        # Track the global Gauss point indices cleanly
         gp_ids_per_elem = np.arange(Num_Elem)[:, None] * num_gp + np.arange(num_gp)[None, :]
         col_idx = np.repeat(gp_ids_per_elem[:, None, :], nodes_per_elem, axis=1).ravel()
-        val_idx = np.tile(E_mat, (Num_Elem, 1)).ravel()
         
+        # Flatten the extrapolation matrix correctly, matching the element mapping sequence
+        # This ensures (20, 14) scales accurately across the mesh without unrolling errors
+        val_idx = np.repeat(E_mat[None, :, :], Num_Elem, axis=0).ravel()
+        
+        # 4. Construct the Global Mapping Operator
         E_global = sp.csr_matrix((val_idx, (row_idx, col_idx)), shape=(Num_Nodes, Num_Elem * num_gp))
         
-        adj_row = Connectivity.ravel(); adj_col = np.repeat(np.arange(Num_Elem), nodes_per_elem); adj_val = np.ones(len(adj_row))
-        Adj = sp.csr_matrix((adj_val, (adj_row, adj_col)), shape=(Num_Nodes, Num_Elem))
-        Node_Counts = np.array(Adj.sum(axis=1)).flatten(); Node_Counts[Node_Counts == 0] = 1 
-        
+        # 5. Compute the Extrapolated Stress Totals at Nodes
         Nodal_Stress_Sum = E_global.dot(sigma_gauss_all.T) 
-        Sigma_Final2 = Nodal_Stress_Sum / Node_Counts[:, np.newaxis]
+        
+        # 6. FIX: True Weighted Nodal Normalization
+        # Sum the actual weights meeting at each node rather than counting the elements.
+        # This accounts for the variable weight profiles of the 14-point scheme.
+        Weight_Sum_Operator = sp.csr_matrix((val_idx, (row_idx, col_idx)), shape=(Num_Nodes, Num_Elem * num_gp))
+        ones_gauss = np.ones(Num_Elem * num_gp)
+        Node_Weights = np.array(Weight_Sum_Operator.dot(ones_gauss)).flatten()
+        Node_Weights[Node_Weights == 0] = 1.0  # Prevent division by zero
+        
+        # 7. Apply the clean normalization scale factor
+        Sigma_Final2 = Nodal_Stress_Sum / Node_Weights[:, np.newaxis]
         return Sigma_Final2
     
     def extract_3D_results(self):
@@ -2326,6 +2390,37 @@ class OfflinePreparationStudio(QMainWindow):
                         E_mat[n, k] = 0.125 * (1 + Node_Loc[n,0]*g_pts[k,0]*r) * (1 + Node_Loc[n,1]*g_pts[k,1]*r) * (1 + Node_Loc[n,2]*g_pts[k,2]*r)
                 return E_mat
                 
+            elif num_gp == 14:
+                # Irons' 14-point rule coordinate parameters
+                a = 0.795822425754221
+                b = 0.758786910639328
+                
+                # 8 Corner-aligned locations
+                gp_corners = np.array([
+                    [-a, -a, -a], [ a, -a, -a], [ a,  a, -a], [-a,  a, -a],
+                    [-a, -a,  a], [ a, -a,  a], [ a,  a,  a], [-a,  a,  a]
+                ])
+                
+                # 6 Axis/Face-aligned locations
+                gp_axes = np.array([
+                    [-b,  0,  0], [ b,  0,  0],
+                    [ 0, -b,  0], [ 0,  b,  0],
+                    [ 0,  0, -b], [ 0,  0,  b]
+                ])
+                
+                # Combine all 14 locations
+                g_pts = np.vstack((gp_corners, gp_axes))
+                
+                # Construct the Shape Function evaluation matrix N_G (14 x 20)
+                N_G = np.zeros((14, 20))
+                for k in range(14):
+                    xi, eta, zeta = g_pts[k, 0], g_pts[k, 1], g_pts[k, 2]
+                    N_shape, _, _, _ = self.Hexa20_ShapeFunctions(xi, eta, zeta)
+                    N_G[k, :] = N_shape
+                    
+                # Compute Least-Squares projection matrix back to the 20 nodes
+                return np.linalg.pinv(N_G)
+                
             elif num_gp == 27:
                 g_pts, _ = self.BuildHexaGauss(3); N_G = np.zeros((27, 20))
                 for k in range(27):
@@ -2335,7 +2430,7 @@ class OfflinePreparationStudio(QMainWindow):
                 return np.linalg.pinv(N_G)
                 
         elif ElementType == 'Tet10':
-            a, b = 0.58541020, 0.13819660; g_pts = np.array([[a, b, b], [b, a, b], [b, b, a], [b, b, b]]); XYZ_G = np.zeros((4, 3))
+            a_t, b_t = 0.58541020, 0.13819660; g_pts = np.array([[a_t, b_t, b_t], [b_t, a_t, b_t], [b_t, b_t, a_t], [b_t, b_t, b_t]]); XYZ_G = np.zeros((4, 3))
             for k in range(4):
                 xi, eta, zeta = g_pts[k,0], g_pts[k,1], g_pts[k,2]; L4 = 1 - xi - eta - zeta
                 N = np.array([

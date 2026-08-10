@@ -398,6 +398,34 @@ Produces professional buttons with:
 
 ## **DATA FLOW DIAGRAM**
 
+---
+
+## **Performance: Solver & Online Reconstruction Speed-ups**
+
+### Overview
+Practical recommendations to accelerate reduced-order solves and online reconstruction during live operation of the Digital Twin.
+
+### Solver speed-ups
+- Precompute reduced operators (Φᵀ K Φ) and factorize offline (Cholesky/LU); reuse the factorization in the online loop.
+- Cache decompositions and reuse across timesteps when boundary conditions and DOF ordering remain unchanged.
+- Use iterative solvers with preconditioners for large reduced systems and exploit sparsity/symmetry using sparse linear-algebra libraries.
+- Ensure NumPy is linked to a multi-threaded BLAS (OpenBLAS/MKL) or use optimized sparse solvers to improve throughput.
+- Apply energy-based basis truncation and investigate hyper-reduction techniques (DEIM, GNAT) for nonlinear costs.
+
+### Online reconstruction speed-ups
+- Precompute mapping matrices for sensors and stress outputs (Φ_sensor, Φ_stress) so predictions compute as small dense multiplies: `predicted = Φ_sensor @ α`.
+- Avoid full-field reconstruction `U_full = Φ @ α` if only sensor/readout values are required; evaluate outputs directly in reduced space.
+- Preallocate arrays and reuse buffers to minimize allocation overhead on each update.
+- Decouple physics solve frequency from GUI rendering frequency to reduce render-induced stalls.
+- Vectorize and batch sensor evaluations to leverage BLAS; consider JIT (Numba) or GPU acceleration for dense projection kernels.
+
+### Quick checklist for integration
+- Profile the live update loop to find hotspots.  
+- Cache reduced operator factorization as the first optimization.  
+- Compute sensor outputs directly from modal coefficients as the second optimization.  
+- Validate accuracy after any basis reduction or hyper-reduction step.
+
+
 ```
 Hardware (Arduino)
     ↓
