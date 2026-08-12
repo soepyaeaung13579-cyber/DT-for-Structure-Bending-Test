@@ -138,7 +138,7 @@ class ProfessionalTheme:
         return header_widget
 
     @staticmethod
-    def apply_professional_panel_style(widget):                        # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def apply_professional_panel_style(widget):                       
         """
         Applies professional panel styling to a group box.
         
@@ -648,6 +648,7 @@ class OfflinePreparationStudio(QMainWindow):
         input_layout.addWidget(QLabel("<b>Disp Modes:</b>"))
         self.disp_modeEditField = QLineEdit("Auto"); self.disp_modeEditField.setFixedWidth(60)
         self.disp_modeEditField.setToolTip("Enter number of displacement modes to retain (e.g. 5, 8) or 'Auto' to use energy threshold recommendation.")
+        self.disp_modeEditField.editingFinished.connect(self.update_rom_mode_selection)
         input_layout.addWidget(self.disp_modeEditField)
         
         self.SnapshotMethodDropDown = QComboBox(); self.SnapshotMethodDropDown.addItems(["USS", "BCSS"])
@@ -668,11 +669,11 @@ class OfflinePreparationStudio(QMainWindow):
         btn_train = QPushButton("Start ROM Training")
         btn_train.setStyleSheet("font-weight: bold; padding: 10px 20px; background-color: #2b5797; color: white; border-radius: 5px;")
         btn_train.clicked.connect(self.TrainButtonPushed); input_layout.addWidget(btn_train)
-        
+
         btn_reconstruct = QPushButton("⚡ Reconstruct ROM")
         btn_reconstruct.setStyleSheet("font-weight: bold; padding: 10px 15px; background-color: #27ae60; color: white; border-radius: 5px;")
         btn_reconstruct.setToolTip("Fast update ROM basis parameters, stiffness matrix projection, and stress modes for user-defined Disp Modes without re-solving snapshots.")
-        btn_reconstruct.clicked.connect(self.ReconstructROMButtonPushed); input_layout.addWidget(btn_reconstruct)
+        btn_reconstruct.clicked.connect(self.update_rom_mode_selection); input_layout.addWidget(btn_reconstruct)
         
         # --- NEW: Improved Clear Graphics Button ---
         btn_clear = QPushButton("🗑️ Clear SVD Plot")
@@ -2190,6 +2191,41 @@ class OfflinePreparationStudio(QMainWindow):
 
         return np.asarray(x_norm) * Lx
 
+    def update_rom_mode_selection(self):
+        """Dynamically updates Phi and K_rom when user changes displacement mode selection in disp_modeEditField."""
+        if not hasattr(self, 'Phi_full') or self.Phi_full is None or not hasattr(self, 'K_reduced') or self.K_reduced is None:
+            return
+        
+        max_modes = self.Phi_full.shape[1]
+        user_disp_mode = self.disp_modeEditField.text().strip() if hasattr(self, 'disp_modeEditField') else "Auto"
+        
+        if user_disp_mode.isdigit() and int(user_disp_mode) > 0:
+            n_modes_disp = min(int(user_disp_mode), max_modes)
+            selection_str = f"User Selected Mode: {n_modes_disp}"
+        else:
+            rec_modes = getattr(self, 'recommended_modes', min(5, max_modes))
+            n_modes_disp = min(rec_modes, max_modes)
+            selection_str = f"Auto Recommended Mode: {n_modes_disp}"
+            if hasattr(self, 'disp_modeEditField'):
+                self.disp_modeEditField.setText(str(n_modes_disp))
+                
+        self.Phi = self.Phi_full[:, :n_modes_disp]
+        self.K_rom = self.Phi.T @ (self.K_reduced @ self.Phi)
+        
+        cum_energy = self.cum_energy_disp[n_modes_disp-1] if hasattr(self, 'cum_energy_disp') and len(self.cum_energy_disp) >= n_modes_disp else 100.0
+        msg = (
+            f"\n--- Dynamic Mode Update ---\n"
+            f"{selection_str}\n"
+            f"Phi Retained Shape: {self.Phi.shape}\n"
+            f"K_rom Dimension: {self.K_rom.shape[0]} x {self.K_rom.shape[1]}\n"
+            f"Retained Displacement Energy: {cum_energy:.4f}%\n"
+            f"---------------------------\n"
+        )
+        print(msg)
+        if hasattr(self, 'TrainningTimeTextArea'):
+            current_log = self.TrainningTimeTextArea.toPlainText()
+            self.TrainningTimeTextArea.setText(msg + current_log)
+
     def TrainButtonPushed(self):
         self.lock_ui() 
         try:
@@ -2278,11 +2314,13 @@ class OfflinePreparationStudio(QMainWindow):
                                         
             modes_over_threshold = np.where(cum_energy_disp >= 100.00)[0]
             if len(modes_over_threshold) > 0:
-                recommended_modes = modes_over_threshold[0] + 3
-                threshold_str = f"Threshold (>=100%) reached at mode {modes_over_threshold[0] + 1}"
+                recommended_modes = modes_over_threshold[0] + 1
+                threshold_str = f"Threshold (>=100%) reached at mode {recommended_modes}"
             else:
-                recommended_modes = min(15, num_snapshots)
+                recommended_modes = num_snapshots
                 threshold_str = "Threshold (>=100%) not reached within snapshots"
+            
+            self.recommended_modes = recommended_modes
                 
             # Allow user input GUI control over n_modes_disp
             user_disp_mode = self.disp_modeEditField.text().strip() if hasattr(self, 'disp_modeEditField') else "Auto"
@@ -2309,36 +2347,11 @@ class OfflinePreparationStudio(QMainWindow):
             self.TrainningTimeTextArea.setText(mode_log + current_log)
             QApplication.processEvents()
                                         
-            self.Phi = self.Phi_full[:, :n_modes_disp]
+            self.Phi = self.Phi_full[:, :n_modes_disp]                                                
             print("Projecting Stiffness Matrix...")
-            self.K_rom = self.Phi.T @ (self.K_reduced @ self.Phi)
-                                    
-            num_modes = self.Phi.shape[1]
-            # Initialize nodal stress ROM matrix
-            self.Phi_nodal_stress = np.zeros((num_nodes * 6, num_modes))
-                        
-            msg = "Generating Exact Stress Modes...\n"; current_text = self.TrainningTimeTextArea.toPlainText()
-            self.TrainningTimeTextArea.setText(msg + current_text); QApplication.processEvents()
-                                    
-            # Show progress dialog for stress mode generation
-            stress_progress = QProgressDialog("Computing Stress Modes...", "Cancel", 0, num_modes, self)
-            stress_progress.setWindowTitle("ROM Training - Stress Stage")
-            stress_progress.setWindowModality(Qt.WindowModality.WindowModal)
-            stress_progress.setStyleSheet("QProgressDialog { background-color: white; }")
-            stress_progress.show()
-                                    
-            for m in range(num_modes):
-                U_mode_full = np.zeros(num_total_dof); U_mode_full[free_dofs] = self.Phi[:, m]
-                Sigma_mode_nodal, _ = self.PostProcess_Stress_3Dsparse(self.B_global, self.D_mat, U_mode_full, self.node_coords, self.element_connectivity, self.element_type)
-                self.Phi_nodal_stress[:, m] = Sigma_mode_nodal.flatten()
-                stress_progress.setValue(m + 1)
-                QApplication.processEvents()
-                                    
-            stress_progress.close()
-                                        
-            success_msg = f"Training Complete!\nModes retained: {n_modes_disp}\nEnergy: {cum_energy_disp[n_modes_disp-1]:.4f}%"
+            self.K_rom = self.Phi.T @ (self.K_reduced @ self.Phi)                      
+            success_msg = f"Training Complete!\nModes retained: {n_modes_disp}\nEnergy: {cum_energy_disp[n_modes_disp-1]:.4f}%\nK_rom Dimension: {self.K_rom.shape[0]} x {self.K_rom.shape[1]}"
             QMessageBox.information(None, "ROM Success", success_msg)
-                                    
             # MEMORY CLEANUP: Force garbage collection after heavy computations
             gc.collect()
         except Exception as e:
@@ -2346,92 +2359,7 @@ class OfflinePreparationStudio(QMainWindow):
             gc.collect()  # Clean up even on error
         finally:
                 self.unlock_ui()
-
-    def ReconstructROMButtonPushed(self):
-        """Fast reconstructs ROM basis parameters, stiffness matrix projection, and stress modes
-        using user-specified Disp Modes from self.disp_modeEditField without re-running FEM snapshot collection."""
-        if not hasattr(self, 'Phi_full') or self.Phi_full is None or not hasattr(self, 'K_reduced') or self.K_reduced is None:
-            QMessageBox.warning(None, "Reconstruction Warning", "No pre-computed ROM basis found.\nPlease click 'Start ROM Training' first to collect snapshots and compute SVD.")
-            return
-
-        self.lock_ui()
-        try:
-            num_snapshots = self.Phi_full.shape[1]
-            cum_energy_disp = self.cum_energy_disp
-            energy_variance = self.energy_variance
-            free_dofs = self.bc_info['free_dofs_indices']
-            num_total_dof = self.K_global.shape[0]
-            num_nodes = self.node_coords.shape[0]
-
-            modes_over_threshold = np.where(cum_energy_disp >= 100.00)[0]
-            recommended_modes = modes_over_threshold[0] + 3 if len(modes_over_threshold) > 0 else min(15, num_snapshots)
-
-            user_disp_mode = self.disp_modeEditField.text().strip() if hasattr(self, 'disp_modeEditField') else "Auto"
-            if user_disp_mode.isdigit() and int(user_disp_mode) > 0:
-                n_modes_disp = min(int(user_disp_mode), num_snapshots)
-                mode_selection_msg = f"Reconstructing with User Input Disp Modes: {n_modes_disp} (Auto recommendation: {recommended_modes})"
-            else:
-                n_modes_disp = min(recommended_modes, num_snapshots)
-                mode_selection_msg = f"Reconstructing with Auto Recommended Disp Modes: {n_modes_disp}"
-                if hasattr(self, 'disp_modeEditField'):
-                    self.disp_modeEditField.setText(str(n_modes_disp))
-
-            mode_log = (
-                f"\n*** Fast ROM Reconstruction ***\n"
-                f"{mode_selection_msg}\n"
-                f"Retained Displacement Energy: {cum_energy_disp[n_modes_disp-1]:.6f}%\n"
-                f"Residual Energy Variance: {energy_variance[n_modes_disp-1]:.6e}%\n"
-                f"-------------------------------\n"
-            )
-            print(mode_log)
-            current_log = self.TrainningTimeTextArea.toPlainText()
-            self.TrainningTimeTextArea.setText(mode_log + current_log)
-            QApplication.processEvents()
-
-            # 1. Update basis
-            self.Phi = self.Phi_full[:, :n_modes_disp]
-
-            # 2. Re-project Stiffness Matrix
-            print("Re-projecting Stiffness Matrix...")
-            self.K_rom = self.Phi.T @ (self.K_reduced @ self.Phi)
-
-            # 3. Re-generate Exact Stress Modes
-            num_modes = self.Phi.shape[1]
-            self.Phi_nodal_stress = np.zeros((num_nodes * 6, num_modes))
-
-            msg = "Re-generating Stress Modes for updated mode count...\n"
-            current_text = self.TrainningTimeTextArea.toPlainText()
-            self.TrainningTimeTextArea.setText(msg + current_text); QApplication.processEvents()
-
-            stress_progress = QProgressDialog(f"Reconstructing {num_modes} Stress Modes...", "Cancel", 0, num_modes, self)
-            stress_progress.setWindowTitle("ROM Reconstruction - Stress Stage")
-            stress_progress.setWindowModality(Qt.WindowModality.WindowModal)
-            stress_progress.setStyleSheet("QProgressDialog { background-color: white; }")
-            stress_progress.show()
-
-            for m in range(num_modes):
-                if stress_progress.wasCanceled():
-                    break
-                U_mode_full = np.zeros(num_total_dof); U_mode_full[free_dofs] = self.Phi[:, m]
-                Sigma_mode_nodal, _ = self.PostProcess_Stress_3Dsparse(
-                    self.B_global, self.D_mat, U_mode_full, self.node_coords, self.element_connectivity, self.element_type
-                )
-                self.Phi_nodal_stress[:, m] = Sigma_mode_nodal.flatten()
-                stress_progress.setValue(m + 1)
-                QApplication.processEvents()
-
-            stress_progress.close()
-
-            success_msg = f"ROM Reconstruction Complete!\nRetained Modes: {n_modes_disp}\nEnergy: {cum_energy_disp[n_modes_disp-1]:.4f}%\nReduced Matrix Size: {self.K_rom.shape[0]}x{self.K_rom.shape[1]}"
-            QMessageBox.information(None, "Reconstruction Success", success_msg)
-
-            gc.collect()
-        except Exception as e:
-            QMessageBox.critical(None, "Reconstruction Error", f"Error during reconstruction:\n{str(e)}\n\n{traceback.format_exc()}")
-            gc.collect()
-        finally:
-            self.unlock_ui() 
-                       
+                    
     def CheckAccuracyButtonPushed(self):
         self.lock_ui() 
         progress = None
@@ -2440,7 +2368,7 @@ class OfflinePreparationStudio(QMainWindow):
 
         try:
             # 1. DATA INTEGRITY CHECKS
-            if not all(hasattr(self, attr) and getattr(self, attr) is not None for attr in ['Phi', 'K_rom', 'Phi_nodal_stress']):
+            if not all(hasattr(self, attr) and getattr(self, attr) is not None for attr in ['Phi', 'K_rom']):
                 raise ValueError("ROM data is missing. Train the ROM first.")
             if not hasattr(self, 'K_reduced') or self.K_reduced is None:
                 raise ValueError("FEM System not solved. Apply BCs and Solve first.")
@@ -2515,7 +2443,7 @@ class OfflinePreparationStudio(QMainWindow):
 
             # 8. ROM STRESS RECONSTRUCTION & ERROR CONTOUR PLOT
             t0 = time.perf_counter()
-            Sigma_rom_nodal = (self.Phi_nodal_stress @ alpha).reshape((-1, 6))
+            Sigma_rom_nodal, _ = self.PostProcess_Stress_3Dsparse(self.B_global, self.D_mat, U_full_rom, self.node_coords, self.element_connectivity, self.element_type)
             time_rom_stress = time.perf_counter() - t0
             
             rel_error_Sigma = np.linalg.norm(Sigma_fem_nodal - Sigma_rom_nodal) / max(np.linalg.norm(Sigma_fem_nodal), 1e-12) * 100.0
@@ -2554,7 +2482,7 @@ class OfflinePreparationStudio(QMainWindow):
 
             # 10. GENERATE REPORT
             results_text = (
-                "--- ROM Type: Nodal Stress ROM ---\n\n"
+                "--- ROM Type: Traditional Displacement ROM ---\n\n"
                 "--- DISPLACEMENT COMPARISON ---\n"
                 f"FEM Max U: {np.max(np.abs(U_full_fem)):.4e} m\n"
                 f"ROM Max U: {np.max(np.abs(U_full_rom)):.4e} m\n"
@@ -2617,7 +2545,7 @@ class OfflinePreparationStudio(QMainWindow):
             New_ROM = {
                 'Label': rom_label, 
                 'Phi': self.Phi, 
-                'Phi_nodal_stress': self.Phi_nodal_stress,
+                'Phi_nodal_stress': getattr(self, 'Phi_nodal_stress', None),
                 'K_rom': self.K_rom, 
                 'bc_info': self.bc_info, 
                 'NumNodes': self.node_coords.shape[0], 
