@@ -2297,9 +2297,9 @@ class OfflinePreparationStudio(QMainWindow):
             ax1 = fig.add_subplot(111); ax2 = ax1.twinx() 
             mode_numbers = np.arange(1, num_snapshots + 1)
             
-            ax1.bar(mode_numbers, S_disp / max(np.max(S_disp), 1e-12), color='#3399CC', alpha=0.8); ax1.set_xlabel('Mode Number'); ax1.set_ylabel('Relative Singular Values', color='black'); ax1.tick_params(axis='y', colors='black'); ax1.grid(True, linestyle='--', alpha=0.5)
-            ax2.plot(mode_numbers, cum_energy_disp, '-bo', linewidth=2, markerfacecolor='b'); ax2.set_ylabel('Cumulative Energy (%)', color='black'); ax2.set_ylim([np.min(cum_energy_disp) , 100]); ax2.tick_params(axis='y', colors='black')
-            ax1.set_title('ROM Invariance: Displacement Modes')
+            ax1.semilogy(mode_numbers, energy_variance, '-ro', linewidth=2, markerfacecolor='r', label='Residual Energy Variance (%)'); ax1.set_xlabel('Mode Number'); ax1.set_ylabel('Residual Energy Variance (%)', color='r'); ax1.tick_params(axis='y', colors='r'); ax1.grid(True, which='both', linestyle='--', alpha=0.5)
+            ax2.semilogy(mode_numbers, cum_energy_disp, '-bo', linewidth=2, markerfacecolor='b', label='Cumulative Energy (%)'); ax2.set_ylabel('Cumulative Energy (%)', color='b'); ax2.tick_params(axis='y', colors='b'); ax2.grid(True, which='both', linestyle=':', alpha=0.3)
+            ax1.set_title('ROM Analysis: Residual Energy Variance & Cumulative Energy')
             if hasattr(fig, 'canvas'): fig.canvas.draw_idle()
                 
             modes_over_threshold = np.where(cum_energy_disp >= 100.00)[0]

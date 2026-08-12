@@ -2286,7 +2286,8 @@ class OfflinePreparationStudio(QMainWindow):
             energy_disp = S_disp**2 
             cum_energy_disp = np.cumsum(energy_disp) / np.sum(energy_disp) * 100.0
             self.cum_energy_disp = cum_energy_disp
-            self.energy_variance = np.maximum(100.0 - cum_energy_disp, 1e-12)
+            energy_variance = np.maximum(100.0 - cum_energy_disp, 1e-12)
+            self.energy_variance = energy_variance
                                     
             # MEMORY CLEANUP: Delete temporary snapshot matrix and Vt, keep self.Phi_full for fast reconstruction
             del self.SnapshotMatrix, Vt
@@ -2296,20 +2297,17 @@ class OfflinePreparationStudio(QMainWindow):
             ax1 = fig.add_subplot(111); ax2 = ax1.twinx() 
             mode_numbers = np.arange(1, num_snapshots + 1)
             
-            # Residual energy variance (%) for semilogy plotting
-            energy_variance = self.energy_variance
-                                    
-            ax1.bar(mode_numbers, S_disp / max(np.max(S_disp), 1e-12), color='#3399CC', alpha=0.8)
+            ax1.semilogy(mode_numbers, energy_variance, '-ro', linewidth=2, markerfacecolor='r', label='Residual Energy Variance (%)')
             ax1.set_xlabel('Mode Number')
-            ax1.set_ylabel('Relative Singular Values', color='black')
-            ax1.tick_params(axis='y', colors='black')
-            ax1.grid(True, linestyle='--', alpha=0.5)
+            ax1.set_ylabel('Residual Energy Variance (%)', color='r')
+            ax1.tick_params(axis='y', colors='r')
+            ax1.grid(True, which='both', linestyle='--', alpha=0.5)
 
-            ax2.semilogy(mode_numbers, energy_variance, '-bo', linewidth=2, markerfacecolor='b', label='Residual Energy Variance (%)')
-            ax2.set_ylabel('Energy Variance / Residual (%)', color='b')
+            ax2.semilogy(mode_numbers, cum_energy_disp, '-bo', linewidth=2, markerfacecolor='b', label='Cumulative Energy (%)')
+            ax2.set_ylabel('Cumulative Energy (%)', color='b')
             ax2.tick_params(axis='y', colors='b')
             ax2.grid(True, which='both', linestyle=':', alpha=0.3)
-            ax1.set_title('ROM Invariance: Displacement Singular Values & Energy Variance')
+            ax1.set_title('ROM Analysis: Residual Energy Variance & Cumulative Energy')
             if hasattr(fig, 'canvas'): fig.canvas.draw_idle()
                                         
             modes_over_threshold = np.where(cum_energy_disp >= 100.00)[0]
