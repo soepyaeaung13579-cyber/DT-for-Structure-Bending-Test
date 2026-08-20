@@ -1,8 +1,6 @@
 """
 Dual ROM Testing System
 ================================================
-A comprehensive PyQt6-based application for mechanical testing simulation,
-ROM visualization, sensor calibration, and live digital twin monitoring.
 
 Author: CSE Lab
 Version: 2.0.0
@@ -2267,7 +2265,7 @@ class OfflinePreparationStudio(QMainWindow):
             ax1.tick_params(axis='y', colors='r')
             ax1.grid(True, which='both', linestyle='--', alpha=0.5)
 
-            ax2.semilogy(mode_numbers, cum_energy_disp, '-bo', linewidth=2, markerfacecolor='b', label='Cumulative Energy (%)')
+            ax2.plot(mode_numbers, cum_energy_disp, '-bo', linewidth=2, markerfacecolor='b', label='Cumulative Energy (%)')
             ax2.set_ylabel('Cumulative Energy (%)', color='b')
             ax2.tick_params(axis='y', colors='b')
             ax2.grid(True, which='both', linestyle=':', alpha=0.3)
@@ -2476,42 +2474,66 @@ class OfflinePreparationStudio(QMainWindow):
             free_dofs = self.bc_info['free_dofs_indices']
             F_red = F_temp[free_dofs]
 
-            # 5. FEM REFERENCE SOLVE
-            t0 = time.perf_counter()
+            # ----------------------------------------------------------------
+            # PRE-CONVERT: Do this BEFORE any timing window opens.
+            # Ensures neither USS nor BCSS pays a hidden conversion cost.
+            # ----------------------------------------------------------------
             K_reduced_csr = self.K_reduced.tocsr() if sp.issparse(self.K_reduced) else sp.csr_matrix(self.K_reduced)
-            U_free_fem = spla.spsolve(K_reduced_csr, F_red)
-            time_fem_solve = time.perf_counter() - t0
-            
+
+            # ----------------------------------------------------------------
+            # 5. FEM REFERENCE SOLVE  (averaged over N_REPEATS for stability)
+            # Single-shot perf_counter at <50ms has high OS jitter. Averaging
+            # gives comparable results regardless of snapshot method.
+            # ----------------------------------------------------------------
+            N_REPEATS = 5
+            _fem_times = []
+            for _r in range(N_REPEATS):
+                _t = time.perf_counter()
+                U_free_fem = spla.spsolve(K_reduced_csr, F_red)
+                _fem_times.append(time.perf_counter() - _t)
+            time_fem_solve = min(_fem_times)  # use min to exclude OS interrupts
+
             num_dof = self.bc_info['total_dofs']
             U_full_fem = np.zeros(num_dof)
             U_full_fem[free_dofs] = U_free_fem
-            
+
             progress.setValue(1)
 
-            # 6. FEM STRESS & PLOT
+            # 6. FEM STRESS & PLOT  (single-shot: dominates computation, jitter is small)
             t0 = time.perf_counter()
             Sigma_fem_nodal, _ = self.PostProcess_Stress_3Dsparse(self.B_global, self.D_mat, U_full_fem, self.node_coords, self.element_connectivity, self.element_type)
             time_fem_stress = time.perf_counter() - t0
-            
+
             if hasattr(self, 'UIAxes9'):
                 self.plot_stresses(Sigma_fem_nodal, stress_type_plot, self.UIAxes9, U_full_fem, scale_factor, title_prefix="FEM Stress", data_label="FEM Stress (MPa)")
-            
-            progress.setValue(2)
-            gc.collect()
 
-            # 7. ROM PROJECTED SOLVE
-            t0 = time.perf_counter()
+            progress.setValue(2)
+            # NOTE: gc.collect() removed here — it invalidates CPU cache and
+            # artificially slows the subsequent ROM timing relative to FEM timing.
+
+            # ----------------------------------------------------------------
+            # 7. ROM PROJECTED SOLVE  (averaged over same N_REPEATS)
+            # With identical rank, USS and BCSS must produce the same time.
+            # ----------------------------------------------------------------
+            _rom_times = []
+            for _r in range(N_REPEATS):
+                _t = time.perf_counter()
+                F_rom = self.Phi.T @ F_red
+                alpha = np.linalg.solve(self.K_rom, F_rom)
+                U_free_rom_proj = self.Phi @ alpha
+                _rom_times.append(time.perf_counter() - _t)
+            time_rom_solve = min(_rom_times)
+            # Final alpha from last repeat — correct value for downstream use
             F_rom = self.Phi.T @ F_red
-            alpha = np.linalg.solve(self.K_rom, F_rom) 
+            alpha = np.linalg.solve(self.K_rom, F_rom)
             U_free_rom_proj = self.Phi @ alpha
-            time_rom_solve = time.perf_counter() - t0
-            
+
             U_full_rom = np.zeros(num_dof)
             U_full_rom[free_dofs] = U_free_rom_proj
-            
+
             progress.setValue(3)
 
-            # 8. ROM STRESS RECONSTRUCTION & ERROR CONTOUR PLOT
+            # 8. ROM STRESS RECONSTRUCTION (single-shot: dominated by matrix multiply)
             t0 = time.perf_counter()
             Sigma_rom_nodal = (self.Phi_nodal_stress @ alpha).reshape((-1, 6))
             time_rom_stress = time.perf_counter() - t0
@@ -2565,16 +2587,16 @@ class OfflinePreparationStudio(QMainWindow):
                 f"NMAE Stress (Global Field): {NMAE_stress:.4f} %\n"
                 f"NMAE Stress ({stress_type_plot}): {NMAE_stress_comp:.4f} %\n\n"
 
-                "--- PERFORMANCE ---\n"
-                f"FEM Solve: {time_fem_solve:.4f} s\n"
-                f"ROM Solve: {time_rom_solve:.4f} s\n"
+                f"--- PERFORMANCE  (min of {N_REPEATS} runs — same rank = same time) ---\n"
+                f"FEM Solve: {time_fem_solve:.6f} s\n"
+                f"ROM Solve: {time_rom_solve:.6f} s\n"
                 f"ROM is {speed_up_solve:.1f}x Faster\n\n"
-                f"FEM Stress Reconstruction: {time_fem_stress:.4f} s\n"
-                f"ROM Stress Reconstruction: {time_rom_stress:.4f} s\n"
+                f"FEM Stress Reconstruction: {time_fem_stress:.6f} s\n"
+                f"ROM Stress Reconstruction: {time_rom_stress:.6f} s\n"
                 f"ROM Stress is {speed_up_stress:.1f}x Faster\n\n"
-                f"FEM Total Time: {(time_fem_solve + time_fem_stress):.4f} s\n"
-                f"ROM Total Time: {(time_rom_solve + time_rom_stress):.4f} s\n"
-                f"Total System Speedup: {(time_fem_solve + time_fem_stress)/(time_rom_solve + time_rom_stress):.1f}x\n\n"    
+                f"FEM Total Time: {(time_fem_solve + time_fem_stress):.6f} s\n"
+                f"ROM Total Time: {(time_rom_solve + time_rom_stress):.6f} s\n"
+                f"Total System Speedup: {(time_fem_solve + time_fem_stress)/(time_rom_solve + time_rom_stress):.1f}x\n\n"
             )
             self.AccuracyResultsTextArea.setText(results_text)
 
